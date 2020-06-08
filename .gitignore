@@ -11,6 +11,7 @@
 # Visual Studio solution folder
 VisualStudioSolution/
 .vscode/
+cuWaveFunctionCollapseVSProj/
 
 # Build folders
 bin/

@@ -61,7 +61,7 @@ int main(int argc, char** argv) {
 	generate_fit_table(patterns, overlays, tile_dim, fit_table);
 
 	Pair p = Pair(width, height);
-	Model model(p,
+	CpuModel model(p,
 	            patterns.size(), overlays.size(),
 	            tile_dim, periodic);
 
@@ -135,8 +135,8 @@ int main(int argc, char** argv) {
 	render_image(model, patterns, result);
 
 	cv::resize(result, result, cv::Size(800, 800), 0.0, 0.0, cv::INTER_AREA);
-	// cv::imshow("result", result);
-	// cv::waitKey(0);
+	 cv::imshow("result", result);
+	 cv::waitKey(0);
 
 	std::ostringstream outputDir;
 	outputDir << "results/" << out_name;

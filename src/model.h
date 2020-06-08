@@ -10,21 +10,73 @@
 	Wave shape x: WX
 	Wave shape y: WY
 */
+
 namespace wfc
 {
 	class Model {
-
 	public:
 		const char dim;
 		const int iteration_limit;
 		const int num_patterns;
 		const int overlay_count;
+		const bool periodic;
 		Pair wave_shape;
-		Pair num_patt_2d;
+
+		virtual ~Model() = default;
+
+		Model(Pair& output_shape, const int num_patterns, const int overlay_count,
+			const char dim, const bool periodic = false, const int iteration_limit = -1)
+				: dim(dim), iteration_limit(iteration_limit), num_patterns(num_patterns),
+				overlay_count(overlay_count),	periodic(periodic),
+				wave_shape(output_shape.x + 1 - dim, output_shape.y + 1 - dim) {}
+
+		/**
+		 * \brief Runs the wfc algorithm and stores the output image (call 'get_image'
+		 * to access).
+		 */
+		virtual void generate(std::vector<Pair> &overlays, std::vector<int> &counts, std::vector<std::vector<int>> &fit_table) = 0;
+		
+		/**
+		 * \brief Generates an image of the superpositions of the wave at (row, col),
+		 * and stores the result in the output image.
+		 */
+		virtual void get_superposition(int row, int col, std::vector<int> &patt_idxs) = 0;
+		
+		/**
+		 * \brief Resets all tiles to a perfect superposition.
+		 */
+		virtual void clear(std::vector<std::vector<int>> &fit_table) = 0;
+	};
+
+	class CpuModel : public Model {
+
+	public:
+		/**
+		 * \brief Initializes a model instance and allocates all workspace data.
+		 */
+		CpuModel(Pair &output_shape, const int num_patterns, const int overlay_count, 
+			const char dim, const bool periodic=false, const int iteration_limit=-1);
+		
+		/**
+		 * \brief Runs the wfc algorithm and stores the output image (call 'get_image'
+		 * to access).
+		 */
+		void generate(std::vector<Pair> &overlays, std::vector<int> &counts, std::vector<std::vector<int>> &fit_table) override;
+		
+		/**
+		 * \brief Generates an image of the superpositions of the wave at (row, col),
+		 * and stores the result in the output image.
+		 */
+		void get_superposition(int row, int col, std::vector<int> &patt_idxs) override;
+		
+		/**
+		 * \brief Resets all tiles to a perfect superposition.
+		 */
+		void clear(std::vector<std::vector<int>> &fit_table) override;
 
 	private:
+		Pair num_patt_2d_;
 		int stack_index_ = 0;
-		bool periodic_;
 
 		/**
 		 * \brief Fixed-space workspace stack for propagation step.
@@ -63,32 +115,7 @@ namespace wfc
 		 * Shape: [WX, WY, N, O]
 		 */
 		std::vector<int> compatible_neighbors_;
-
-	public:
-		/**
-		 * \brief Initializes a model instance and allocates all workspace data.
-		 */
-		Model(Pair &output_shape, const int num_patterns, const int overlay_count, 
-			const char dim, const bool periodic=false, const int iteration_limit=-1);
 		
-		/**
-		 * \brief Runs the wfc algorithm and stores the output image (call 'get_image'
-		 * to access).
-		 */
-		void generate(std::vector<Pair> &overlays, std::vector<int> &counts, std::vector<std::vector<int>> &fit_table);
-		
-		/**
-		 * \brief Generates an image of the superpositions of the wave at (row, col),
-		 * and stores the result in the output image.
-		 */
-		void get_superposition(int row, int col, std::vector<int> &patt_idxs);
-		
-		/**
-		 * \brief Resets all tiles to a perfect superposition.
-		 */
-		void clear(std::vector<std::vector<int>> &fit_table);
-		
-	private:
 		/**
 		 * \brief Finds the wave with lowest entropy and stores it's position in idx
 		 */
@@ -122,5 +149,52 @@ namespace wfc
 		 * the overall state at that position and reduces it's entropy.
 		 */
 		void ban_waveform(Waveform wave);
+	};
+
+	class GpuModel : public Model {
+	public:
+		/**
+		 * \brief Initializes a model instance and allocates all workspace data.
+		 */
+		GpuModel(Pair &output_shape, const int num_patterns, const int overlay_count, 
+			const char dim, const bool periodic=false, const int iteration_limit=-1);
+		
+		/**
+		 * \brief Runs the wfc algorithm and stores the output image (call 'get_image'
+		 * to access).
+		 */
+		void generate(std::vector<Pair> &overlays, std::vector<int> &counts, std::vector<std::vector<int>> &fit_table) override;
+		
+		/**
+		 * \brief Generates an image of the superpositions of the wave at (row, col),
+		 * and stores the result in the output image.
+		 */
+		void get_superposition(int row, int col, std::vector<int> &patt_idxs) override;
+		
+		/**
+		 * \brief Resets all tiles to a perfect superposition.
+		 */
+		void clear(std::vector<std::vector<int>> &fit_table) override;
+
+	private:
+		int* entropy_;
+		char* waves_;
+		
+		/**
+		 * \brief Finds the wave with lowest entropy and stores it's position in idx
+		 */
+		void get_lowest_entropy(Pair &idx);
+		
+		/**
+		 * \brief Performs an observation on the wave at the given position and
+		 * collapses it to a single state.
+		 */
+		void observe_wave(Pair &pos, std::vector<int> &counts);
+		
+		/**
+		 * \brief Iteratively collapses waves in the tilemap until no conflicts exist.
+		 * Meant to be used after collapsing a wave by observing it.
+		 */
+		void propagate(std::vector<Pair>& overlays, std::vector<std::vector<int>> &fit_table);
 	};
 }
