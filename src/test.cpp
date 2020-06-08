@@ -135,8 +135,8 @@ int main(int argc, char** argv) {
 	render_image(model, patterns, result);
 
 	cv::resize(result, result, cv::Size(800, 800), 0.0, 0.0, cv::INTER_AREA);
-	cv::imshow("result", result);
-	cv::waitKey(0);
+	// cv::imshow("result", result);
+	// cv::waitKey(0);
 
 	std::ostringstream outputDir;
 	outputDir << "results/" << out_name;

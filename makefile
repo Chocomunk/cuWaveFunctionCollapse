@@ -1,13 +1,13 @@
 # C++ Compiler
 CC = g++
 CFLAGS = -g -Wall
-OPENCV = opencv4
+OPENCV = opencv
 LDFLAGS = `pkg-config --libs --cflags $(OPENCV)`
 
 # Folders 
 BINDIR = bin
 OBJDIR = obj
-SRCDIR = cpp
+SRCDIR = src
 
 # Files
 SRC = $(wildcard $(SRCDIR)/*.cpp)
