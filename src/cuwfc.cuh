@@ -7,9 +7,12 @@
 
 void cudaClearKernel();
 
-void cudaUpdateWavesKernel();
+void cudaUpdateWavesKernel(char* waves, int waves_x, int waves_y, int num_patterns);
 
 void cudaLowestEntropyKernel();
 
-void cudaCollapseWaveKernel();
+void cudaCollapseWaveKernel(char* waves, int idx, int state, 
+							int waves_x, int waves_y, int num_patterns);
 
+void cudaComputeEntropiesKernel(char* waves, int* entropies, 
+								int waves_x, int waves_y, int num_patterns);

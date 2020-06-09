@@ -214,6 +214,7 @@ namespace wfc
 	void GpuModel::generate(std::vector<Pair>& overlays, std::vector<int>& counts, std::vector<std::vector<int>>& fit_table) {
 		std::cout << "Called Generate" << std::endl;
 		// TODO: convert fit_table and overlays to GPU data for propagate kernel
+		bool* dev_fit_table = get_device_fit_table(fit_table);
 
 		// Initialize board into complete superposition, and pick a random wave to collapse
 		clear(fit_table);
@@ -319,7 +320,32 @@ namespace wfc
 		observed_[get_idx(pos, wave_shape, 1, 0)] = collapsed_index;
 	}
 
-	void GpuModel::propagate(std::vector<Pair>& overlays, std::vector<std::vector<int>>& fit_table) {
-		// TODO: Call CUDA Kernel
+	void GpuModel::propagate(bool* fit_table) {
+		// TODO: Call CUDA Kernel and recieve overlays externally
+	}
+
+	bool* GpuModel::get_device_fit_table(std::vector<std::vector<int>>& fit_table) {
+		size_t length = num_patterns * overlay_count * num_patterns;
+		
+		// Rebuild fit_table from adjacency list to edge-matrix in CPU first
+		bool* host_fit_table = new bool[length];
+		memset(host_fit_table, 0, num_patterns * overlay_count * num_patterns);
+		for (int c=0; c < num_patterns; c++) {
+			for (int o=0; o < overlay_count; o++) {
+				int base_idx = c * overlay_count * num_patterns + o * num_patterns;
+				for (int other_patt: fit_table[base_idx]) {
+					host_fit_table[base_idx + other_patt] = true;
+				}
+			}
+		}
+
+		// Transfer new fit_table to GPU devicce
+		bool* dev_fit_table;
+		CUDA_CALL(cudaMalloc((void**)&dev_fit_table, sizeof(bool) * length));
+		cudaMemcpy(dev_fit_table, host_fit_table, sizeof(bool) * length, cudaMemcpyHostToDevice);
+
+		// Free CPU matrix and return device pointer
+		delete host_fit_table;
+		return dev_fit_table;
 	}
 }
