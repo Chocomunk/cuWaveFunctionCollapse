@@ -10,6 +10,7 @@
 
 #include "cuwfc.cuh"
 
+
 #define NUM_THREADS_1D(x) ((x) > 1024 ? 1024 : (x))
 #define NUM_BLOCKS_1D(total_threads, num_threads) ((total_threads) / (num_threads))
 
@@ -157,45 +158,33 @@ void cudaComputeEntropiesKernel(char* waves, int* entropies, int num_waves, int 
  * Host Interface Functions
  */
 
-bool cudaCallUpdateWavesKernel(char* waves, bool* fits, int* overlays, 
+bool cudaCallUpdateWavesKernel(char* waves, bool* fits, int* overlays,
 								int waves_x, int waves_y, 
-								int num_patterns, int num_overlays) {
+								int num_patterns, int num_overlays,
+								bool* changes, int changes_size, int* changed) {
 	int total_work = waves_x * waves_y;
 	int numThreads = NUM_THREADS_1D(total_work);
 	int numBlocks = NUM_BLOCKS_1D(total_work, numThreads);
 	int fits_size = num_patterns * num_overlays * num_patterns;
-
-	// NOTE: may need to pad this to power of 2
-	// Will be initialized in the kernel
-	bool* changes;
-	int* changed;
-	CUDA_CALL(cudaMalloc((void**)&changes, sizeof(bool) * total_work));
-	CUDA_CALL(cudaMalloc((void**)&changed, sizeof(int)));
 	
 	cudaUpdateWavesKernel<<<numBlocks, numThreads, fits_size>>>(
 		waves, fits, overlays, changes, 
 		waves_x, waves_y, num_patterns, num_overlays);
 
 	switch (numThreads) {
-	case 1024: cudaReduceOrKernel<1024> <<<numBlocks, numThreads>>> (changes, changed, total_work); break;
-	case 512: cudaReduceOrKernel<512> <<<numBlocks, numThreads>>> (changes, changed, total_work); break;
-	case 256: cudaReduceOrKernel<256> <<<numBlocks, numThreads>>> (changes, changed, total_work); break;
-	case 128: cudaReduceOrKernel<128> <<<numBlocks, numThreads>>> (changes, changed, total_work); break;
-	case  64: cudaReduceOrKernel< 64> <<<numBlocks, numThreads>>> (changes, changed, total_work); break;
-	case  32: cudaReduceOrKernel< 32> <<<numBlocks, numThreads>>> (changes, changed, total_work); break;
-	case  16: cudaReduceOrKernel< 16> <<<numBlocks, numThreads>>> (changes, changed, total_work); break;
-	case   8: cudaReduceOrKernel<  8> <<<numBlocks, numThreads>>> (changes, changed, total_work); break;
-	case   4: cudaReduceOrKernel<  4> <<<numBlocks, numThreads>>> (changes, changed, total_work); break;
-	case   2: cudaReduceOrKernel<  2> <<<numBlocks, numThreads>>> (changes, changed, total_work); break;
-	case   1: cudaReduceOrKernel<  1> <<<numBlocks, numThreads>>> (changes, changed, total_work); break;
+	case 1024: cudaReduceOrKernel<1024> <<<numBlocks, numThreads>>> (changes, changed, changes_size); break;
+	case 512: cudaReduceOrKernel<512> <<<numBlocks, numThreads>>> (changes, changed, changes_size); break;
+	case 256: cudaReduceOrKernel<256> <<<numBlocks, numThreads>>> (changes, changed, changes_size); break;
+	case 128: cudaReduceOrKernel<128> <<<numBlocks, numThreads>>> (changes, changed, changes_size); break;
+	case  64: cudaReduceOrKernel< 64> <<<numBlocks, numThreads>>> (changes, changed, changes_size); break;
+	case  32: cudaReduceOrKernel< 32> <<<numBlocks, numThreads>>> (changes, changed, changes_size); break;
+	case  16: cudaReduceOrKernel< 16> <<<numBlocks, numThreads>>> (changes, changed, changes_size); break;
+	case   8: cudaReduceOrKernel<  8> <<<numBlocks, numThreads>>> (changes, changed, changes_size); break;
+	case   4: cudaReduceOrKernel<  4> <<<numBlocks, numThreads>>> (changes, changed, changes_size); break;
+	case   2: cudaReduceOrKernel<  2> <<<numBlocks, numThreads>>> (changes, changed, changes_size); break;
+	case   1: cudaReduceOrKernel<  1> <<<numBlocks, numThreads>>> (changes, changed, changes_size); break;
 	}
 
-	int* host_changed = new int;
-	cudaMemcpy(host_changed, changed, sizeof(int), cudaMemcpyDeviceToHost);
-
-	bool is_changed = *host_changed > 0;
-	delete host_changed;
-	return is_changed;
 }
 
 // NOTE: Does not update entropy value, only updates waves

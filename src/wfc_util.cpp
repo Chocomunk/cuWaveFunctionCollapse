@@ -112,4 +112,18 @@ namespace wfc
 	int rand_int(const int max_val) {
 		return rand() % max_val;
 	}
+
+	int next_pow_2(int n) {
+		unsigned count = 0;
+
+		if (n && !(n & (n - 1)))
+			return n;
+
+		while (n != 0) {
+			n >>= 1;
+			count += 1;
+		}
+
+		return 1 << count;
+	}
 }

@@ -181,7 +181,13 @@ namespace wfc
 	private:
 		int* dev_entropy_;
 		char* dev_waves_;
+		bool* dev_changes_;
+		int* dev_changed_;
+
 		char* host_waves_;
+		int* host_changed_;
+
+		int changes_length_;
 		
 		/**
 		 * \brief Finds the wave with lowest entropy and stores it's position in idx
@@ -204,6 +210,6 @@ namespace wfc
 
 		int* get_device_overlays(std::vector<Pair> &overlays) const;
 
-		void apply_host_waves();
+		void apply_host_waves() const;
 	};
 }

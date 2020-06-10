@@ -203,10 +203,16 @@ namespace wfc
 		Model(output_shape, num_patterns, overlay_count, dim, periodic, iteration_limit) {
 		srand(time(nullptr));
 
+		changes_length_ = next_pow_2(wave_shape.size);
+
 		// Initialize collections.
 		CUDA_CALL(cudaMalloc((void**)&dev_entropy_, sizeof(int) * wave_shape.size));
 		CUDA_CALL(cudaMalloc((void**)&dev_waves_, sizeof(char) * wave_shape.size * num_patterns));
+		CUDA_CALL(cudaMalloc((void**)&dev_changes_, sizeof(bool) * changes_length_));
+		CUDA_CALL(cudaMalloc((void**)&dev_changed_, sizeof(int)));
+
 		host_waves_ = new char[wave_shape.size * num_patterns];
+		host_changed_ = new int;
 
 		std::cout << "Patterns: " << num_patterns << std::endl;
 		std::cout << "Overlay Count: " << overlay_count << std::endl;
@@ -216,13 +222,16 @@ namespace wfc
 	GpuModel::~GpuModel() {
 		CUDA_CALL(cudaFree(dev_entropy_));
 		CUDA_CALL(cudaFree(dev_waves_));
+		CUDA_CALL(cudaFree(dev_changes_));
+		CUDA_CALL(cudaFree(dev_changed_));
 		delete[] host_waves_;
+		delete host_changed_;
 	}
 
 
 	void GpuModel::generate(std::vector<Pair>& overlays, std::vector<int>& counts, std::vector<std::vector<int>>& fit_table) {
 		std::cout << "Called Generate" << std::endl;
-		// TODO: convert fit_table and overlays to GPU data for propagate kernel
+		// Convert fit_table and overlays to GPU data for propagate kernel
 		bool* dev_fit_table = get_device_fit_table(fit_table);
 		int* dev_overlays = get_device_overlays(overlays);
 
@@ -320,16 +329,20 @@ namespace wfc
 		collapsed_index -= 1;	// Counter-action against additional increment from for-loop
 		assert(collapsed_index > 0 && collapsed_index < num_patterns);
 
-		// TODO: Update wave in the GPU data
+		// Update wave in the GPU data
 		cudaCallCollapseWaveKernel(dev_waves_, idx,collapsed_index, num_patterns);
 	}
 
 	void GpuModel::propagate(int* overlays, bool* fit_table) const {
-		// TODO: Call CUDA Kernel and recieve overlays externally
 		bool changed = true;
 		while (changed) {
-			changed = cudaCallUpdateWavesKernel(dev_waves_, fit_table, overlays,
-				wave_shape.x, wave_shape.y, num_patterns, overlay_count);
+			cudaCallUpdateWavesKernel(dev_waves_, fit_table, overlays,
+				wave_shape.x, wave_shape.y, num_patterns, overlay_count,
+				dev_changes_, changes_length_, dev_changed_);
+
+			cudaMemcpy(host_changed_, dev_changed_, sizeof(int), cudaMemcpyDeviceToHost);
+
+			changed = *host_changed_ > 0;
 		}
 		
 		cudaCallComputeEntropiesKernel(dev_waves_, dev_entropy_, wave_shape.size, num_patterns);
@@ -381,7 +394,7 @@ namespace wfc
 		return dev_overlays;
 	}
 
-	void GpuModel::apply_host_waves() {
+	void GpuModel::apply_host_waves() const {
 		cudaMemcpy(host_waves_, dev_waves_, 
 			sizeof(char) * wave_shape.size * num_patterns, 
 			cudaMemcpyDeviceToHost);

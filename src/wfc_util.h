@@ -90,6 +90,8 @@ namespace wfc
 	 */
 	int rand_int(int max_val);
 
+	int next_pow_2(int n);
+
 	inline bool Pair::non_negative() const
 	{
 		return this->x >= 0 && this->y >= 0;
