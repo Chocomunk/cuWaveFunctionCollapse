@@ -18,19 +18,6 @@
  * Device Kernels
  */
 
-template <unsigned int blockSize>
-__device__ void warpReduceOr(volatile float* sdata, unsigned int tid) {
-	volatile float* addr = sdata + tid;
-	if (blockSize >= 64) sdata[tid] = *addr || *(addr + 32);
-	if (blockSize >= 32) sdata[tid] = *addr || *(addr + 16);
-	if (blockSize >= 16) sdata[tid] = *addr || *(addr + 8);
-	if (blockSize >= 8) sdata[tid] = *addr || *(addr + 4);
-	if (blockSize >= 4) sdata[tid] = *addr || *(addr + 2);
-	if (blockSize >= 2) sdata[tid] = *addr || *(addr + 1);
-}
-
-template <unsigned int blockSize>
-
 
  __global__ 
  void cudaClearKernel(char* waves, int* entropies, int shape, int num_patterns) {
@@ -51,7 +38,6 @@ template <unsigned int blockSize>
 		tid += blockDim.x * gridDim.x;
 	}
 }
-
 
 __global__ 
 void cudaLowestEntropyKernel(int* entropies, int shape, int* lowest_entropy_idx) { 
@@ -109,7 +95,18 @@ void cudaLowestEntropyKernel(int* entropies, int shape, int* lowest_entropy_idx)
 
 }
 
+template <unsigned int blockSize>
+__device__ void warpReduceOr(volatile float* sdata, unsigned int tid) {
+	volatile float* addr = sdata + tid;
+	if (blockSize >= 64) sdata[tid] = *addr || *(addr + 32);
+	if (blockSize >= 32) sdata[tid] = *addr || *(addr + 16);
+	if (blockSize >= 16) sdata[tid] = *addr || *(addr + 8);
+	if (blockSize >= 8) sdata[tid] = *addr || *(addr + 4);
+	if (blockSize >= 4) sdata[tid] = *addr || *(addr + 2);
+	if (blockSize >= 2) sdata[tid] = *addr || *(addr + 1);
+}
 
+template <unsigned int blockSize>
 __global__
 void cudaReduceOrKernel(bool* out_data, int* output, int length) {
 	__shared__ float data[blockSize];
@@ -269,13 +266,13 @@ bool cudaCallUpdateWavesKernel(char* waves, bool* fits, int* overlays,
  void cudaCallClearKernel(char* waves, int* entropies, int shape, int num_patterns) {
 	int numThreads = NUM_THREADS_1D(num_patterns);
 	int numBlocks = NUM_BLOCKS_1D(num_patterns, numThreads);
-	cudaClearKernel<<<numBlocks, numThreads>>>(char* waves, int* entropies, int shape, int num_patterns);
+	cudaClearKernel<<<numBlocks, numThreads>>>(waves, entropies, shape, num_patterns);
  }
 
  void cudaCallLowestEntropyKernel(int* entropies, int shape, int num_patterns, int* lowest_entropy_idx) { 
 	int numThreads = NUM_THREADS_1D(num_patterns);
 	int numBlocks = NUM_BLOCKS_1D(num_patterns, numThreads);
-	cudaLowestEntropyKernel<<<numBlocks, numThreads>>>(int* entropy, int shape, int* lowest_entropy_idx);
+	cudaLowestEntropyKernel<<<numBlocks, numThreads>>>(entropies, shape, lowest_entropy_idx);
  }
 
 // NOTE: Does not update entropy value, only updates waves
