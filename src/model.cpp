@@ -277,13 +277,7 @@ namespace wfc
 
 	void GpuModel::clear(std::vector<std::vector<int>>& fit_table) {
 		// TODO: GPU clear kernel
-		
-		for (int wave = 0; wave < wave_shape.size; wave++) {
-			for (int patt = 0; patt < num_patterns; patt++) {
-				dev_waves_[wave * num_patterns + patt] = true;
-			}
-			dev_entropy_[wave] = num_patterns;
-		}
+		cudaCallClearKernel(dev_waves_, dev_entropy_, wave_shape.size, num_patterns);
 	}
 
 	int GpuModel::get_lowest_entropy() const {
