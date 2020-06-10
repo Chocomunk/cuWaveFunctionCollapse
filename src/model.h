@@ -158,6 +158,8 @@ namespace wfc
 		 */
 		GpuModel(Pair &output_shape, const int num_patterns, const int overlay_count, 
 			const char dim, const bool periodic=false, const int iteration_limit=-1);
+
+		~GpuModel();
 		
 		/**
 		 * \brief Runs the wfc algorithm and stores the output image (call 'get_image'
@@ -177,28 +179,31 @@ namespace wfc
 		void clear(std::vector<std::vector<int>> &fit_table) override;
 
 	private:
-		int* entropy_;
-		char* waves_;
+		int* dev_entropy_;
+		char* dev_waves_;
+		char* host_waves_;
 		
 		/**
 		 * \brief Finds the wave with lowest entropy and stores it's position in idx
 		 */
-		int get_lowest_entropy();
+		int get_lowest_entropy() const;
 		
 		/**
 		 * \brief Performs an observation on the wave at the given position and
 		 * collapses it to a single state.
 		 */
-		void observe_wave(int idx, std::vector<int> &counts);
+		void observe_wave(int idx, std::vector<int> &counts) const;
 		
 		/**
 		 * \brief Iteratively collapses waves in the tilemap until no conflicts exist.
 		 * Meant to be used after collapsing a wave by observing it.
 		 */
-		void propagate(int* overlays, bool* fit_table);
+		void propagate(int* overlays, bool* fit_table) const;
 
-		bool* get_device_fit_table(std::vector<std::vector<int>>& fit_table);
+		bool* get_device_fit_table(std::vector<std::vector<int>>& fit_table) const;
 
-		int* get_device_overlays(std::vector<Pair> &overlays);
+		int* get_device_overlays(std::vector<Pair> &overlays) const;
+
+		void apply_host_waves();
 	};
 }

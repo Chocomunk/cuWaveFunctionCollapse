@@ -48,6 +48,7 @@ void cudaReduceOrKernel(bool* out_data, int* output, int length) {
 	}
 	__syncthreads();
 
+	if (blockSize >= 1024) { if (tid < 512) { data[tid] = *addr || *(addr + 512); } __syncthreads(); }
 	if (blockSize >= 512) { if (tid < 256) { data[tid] = *addr || *(addr + 256); } __syncthreads(); }
 	if (blockSize >= 256) { if (tid < 128) { data[tid] = *addr || *(addr + 128); } __syncthreads(); }
 	if (blockSize >= 128) { if (tid < 64) { data[tid] = *addr || *(addr + 64); } __syncthreads(); }
@@ -56,11 +57,25 @@ void cudaReduceOrKernel(bool* out_data, int* output, int length) {
 	if (tid == 0) atomicOr(output, data[0]);
 }
 
+__device__
+void copyFits(bool* s_data, bool* fits, int length) {
+	unsigned tid = threadIdx.x + blockIdx.x * blockDim.x;
+	while (tid < length) {
+		s_data[tid] = fits[tid];
+		
+		tid += blockDim.x * gridDim.x;
+	}
+}
+
 __global__
 void cudaUpdateWavesKernel(char* waves, bool* fits, int* overlays, bool* changes,
 								int waves_x, int waves_y, 
 								int num_patterns, int num_overlays) {
 	// TODO: Use shared memory
+	extern __shared__ bool s_fits[];
+
+	copyFits(s_fits, fits, num_patterns * num_overlays * num_patterns);
+	
 	unsigned tid = threadIdx.x + blockIdx.x * blockDim.x;
 	unsigned tid_base = tid * num_patterns;
 	bool changed = false;
@@ -85,7 +100,7 @@ void cudaUpdateWavesKernel(char* waves, bool* fits, int* overlays, bool* changes
 					// preventing thread divergence, the inner loops are kept as
 					// redundant computations.
 					bool waves_cond = valid && waves[tid_base + c] && waves[other_base + other_patt];
-					bool is_fit = fits[c_idx + o_idx + other_patt];
+					bool is_fit = s_fits[c_idx + o_idx + other_patt];
 
 					// We can also just stop once "allowed = true", but again we
 					// want to prevent thread divergence.
@@ -148,6 +163,7 @@ bool cudaCallUpdateWavesKernel(char* waves, bool* fits, int* overlays,
 	int total_work = waves_x * waves_y;
 	int numThreads = NUM_THREADS_1D(total_work);
 	int numBlocks = NUM_BLOCKS_1D(total_work, numThreads);
+	int fits_size = num_patterns * num_overlays * num_patterns;
 
 	// NOTE: may need to pad this to power of 2
 	// Will be initialized in the kernel
@@ -156,10 +172,12 @@ bool cudaCallUpdateWavesKernel(char* waves, bool* fits, int* overlays,
 	CUDA_CALL(cudaMalloc((void**)&changes, sizeof(bool) * total_work));
 	CUDA_CALL(cudaMalloc((void**)&changed, sizeof(int)));
 	
-	cudaUpdateWavesKernel<<<numBlocks, numThreads>>>(waves, fits, overlays, changes, 
+	cudaUpdateWavesKernel<<<numBlocks, numThreads, fits_size>>>(
+		waves, fits, overlays, changes, 
 		waves_x, waves_y, num_patterns, num_overlays);
 
 	switch (numThreads) {
+	case 1024: cudaReduceOrKernel<1024> <<<numBlocks, numThreads>>> (changes, changed, total_work); break;
 	case 512: cudaReduceOrKernel<512> <<<numBlocks, numThreads>>> (changes, changed, total_work); break;
 	case 256: cudaReduceOrKernel<256> <<<numBlocks, numThreads>>> (changes, changed, total_work); break;
 	case 128: cudaReduceOrKernel<128> <<<numBlocks, numThreads>>> (changes, changed, total_work); break;
