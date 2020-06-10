@@ -215,6 +215,7 @@ namespace wfc
 		std::cout << "Called Generate" << std::endl;
 		// TODO: convert fit_table and overlays to GPU data for propagate kernel
 		bool* dev_fit_table = get_device_fit_table(fit_table);
+		int* dev_overlays = get_device_overlays(overlays);
 
 		// Initialize board into complete superposition, and pick a random wave to collapse
 		clear(fit_table);
@@ -231,7 +232,7 @@ namespace wfc
 			 */
 			// TODO: Pass in proper converted GPU data
 			observe_wave(lowest_entropy_idx, counts);
-			propagate(overlays, fit_table);
+			propagate(dev_overlays, dev_fit_table);
 			get_lowest_entropy(lowest_entropy_idx);
 
 			iteration += 1;
@@ -320,7 +321,7 @@ namespace wfc
 		observed_[get_idx(pos, wave_shape, 1, 0)] = collapsed_index;
 	}
 
-	void GpuModel::propagate(bool* fit_table) {
+	void GpuModel::propagate(int* overlays, bool* fit_table) {
 		// TODO: Call CUDA Kernel and recieve overlays externally
 	}
 
@@ -342,10 +343,31 @@ namespace wfc
 		// Transfer new fit_table to GPU devicce
 		bool* dev_fit_table;
 		CUDA_CALL(cudaMalloc((void**)&dev_fit_table, sizeof(bool) * length));
-		cudaMemcpy(dev_fit_table, host_fit_table, sizeof(bool) * length, cudaMemcpyHostToDevice);
+		CUDA_CALL(cudaMemcpy(dev_fit_table, host_fit_table, sizeof(bool) * length, cudaMemcpyHostToDevice));
 
 		// Free CPU matrix and return device pointer
-		delete host_fit_table;
+		delete[] host_fit_table;
 		return dev_fit_table;
+	}
+
+	// Returns a "pair" array where paired ints are sequential
+	int* GpuModel::get_device_overlays(std::vector<Pair> &overlays) {
+		// Because of the extra "size" parameter that we dont want, make a CPU
+		// array to copy to GPU. May remove "size" parameter in the future
+		int* host_overlays = new int[overlay_count * 2];
+		for (int i=0; i < overlay_count; i++) {
+			host_overlays[2 * i] = overlays[i].x;
+			host_overlays[2 * i + 1] = overlays[i].y;
+		}
+
+		// Transfer host overlays to GPU device
+		int* dev_overlays;
+		CUDA_CALL(cudaMalloc((void**)&dev_overlays, sizeof(int) * 2 * overlay_count));
+		CUDA_CALL(cudaMemcpy(dev_overlays, host_overlays, 
+				sizeof(int) * 2 * overlay_count, cudaMemcpyHostToDevice));
+
+		// Free CPU array and return device pointer
+		delete[] host_overlays;
+		return dev_overlays;
 	}
 }

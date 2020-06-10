@@ -7,7 +7,9 @@
 
 void cudaCallClearKernel();
 
-void cudaCallUpdateWavesKernel(char* waves, int waves_x, int waves_y, int num_patterns);
+bool cudaCallUpdateWavesKernel(char* waves, bool* fits, int* overlays, 
+								int waves_x, int waves_y, 
+								int num_patterns, int num_overlays);
 
 void cudaCallLowestEntropyKernel();
 

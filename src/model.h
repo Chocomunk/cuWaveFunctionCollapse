@@ -195,8 +195,10 @@ namespace wfc
 		 * \brief Iteratively collapses waves in the tilemap until no conflicts exist.
 		 * Meant to be used after collapsing a wave by observing it.
 		 */
-		void propagate(bool* fit_table);
+		void propagate(int* overlays, bool* fit_table);
 
 		bool* get_device_fit_table(std::vector<std::vector<int>>& fit_table);
+
+		int* get_device_overlays(std::vector<Pair> &overlays);
 	};
 }

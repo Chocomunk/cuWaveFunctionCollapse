@@ -1,4 +1,5 @@
 #include "cuda_runtime.h"
+#include "helper_cuda.h"
 
 // Imports for developing on windows
 #if defined(WIN32) || defined(_WIN32) || defined(__WIN32) && !defined(__CYGWIN__)
@@ -16,12 +17,122 @@
  * Device Kernels
  */
 
+template <unsigned int blockSize>
+__device__ void warpReduceOr(volatile float* sdata, unsigned int tid) {
+	volatile float* addr = sdata + tid;
+	if (blockSize >= 64) sdata[tid] = *addr || *(addr + 32);
+	if (blockSize >= 32) sdata[tid] = *addr || *(addr + 16);
+	if (blockSize >= 16) sdata[tid] = *addr || *(addr + 8);
+	if (blockSize >= 8) sdata[tid] = *addr || *(addr + 4);
+	if (blockSize >= 4) sdata[tid] = *addr || *(addr + 2);
+	if (blockSize >= 2) sdata[tid] = *addr || *(addr + 1);
+}
+
+template <unsigned int blockSize>
+__global__
+void cudaReduceOrKernel(bool* out_data, int* output, int length) {
+	__shared__ float data[blockSize];
+	unsigned tid = threadIdx.x;
+	unsigned get_idx = blockIdx.x * blockDim.x + threadIdx.x;
+	unsigned gridSize = blockSize * 2 * gridDim.x;
+
+	float* addr = data + tid;   // Address of the shmem element for this thread
+	data[tid] = out_data[get_idx];
+	data[tid] = *addr || out_data[get_idx + blockSize];
+	get_idx += gridSize;
+
+	while (get_idx < padded_length) {
+		data[tid] = *addr || out_data[get_idx];
+		data[tid] = *addr || out_data[get_idx + blockSize];
+		get_idx += gridSize;
+	}
+	__syncthreads();
+
+	if (blockSize >= 512) { if (tid < 256) { data[tid] = *addr || *(addr + 256); } __syncthreads(); }
+	if (blockSize >= 256) { if (tid < 128) { data[tid] = *addr || *(addr + 128); } __syncthreads(); }
+	if (blockSize >= 128) { if (tid < 64) { data[tid] = *addr || *(addr + 64); } __syncthreads(); }
+
+	if (tid < 32) warpReduceOr<blockSize>(data, tid);
+	if (tid == 0) atomicOr(output, data[0]);
+}
+
+__global__
+void cudaUpdateWavesKernel(char* waves, bool* fits, int* overlays, bool* changes,
+								int waves_x, int waves_y, 
+								int num_patterns, int num_overlays) {
+	// TODO: Use shared memory
+	unsigned tid = threadIdx.x + blockIdx.x * blockDim.x;
+	unsigned tid_base = tid * num_patterns;
+	bool changed = false;
+	
+	while(tid < waves_x * waves_y) {
+		for (int c=0; c < num_patterns; c++) {
+
+			int c_idx = c * num_overlays * num_patterns;
+			bool allowed = false;
+			for (int o=0; o < num_overlays; o++) {
+				int o_x = overlays[2 * o];
+				int o_y = overlays[2 * o + 1];
+				int o_idx = o * num_patterns;
+				int other_idx = tid + o_y * waves_x + o_x;
+				int other_base = other_idx * num_patterns;
+				bool valid = other_idx >= 0 && other_idx < waves_x * waves_y;
+				
+				for (int other_patt=0; other_patt < num_patterns; other_patt++) {
+					// Splits conditions to encourage cache hits.
+					// Note: center wave condition can be computed externally
+					// and block all both inner loops, but in the interest of
+					// preventing thread divergence, the inner loops are kept as
+					// redundant computations.
+					bool waves_cond = valid && waves[tid_base + c] && waves[other_base + other_patt];
+					bool is_fit = fits[c_idx + o_idx + other_patt];
+
+					// We can also just stop once "allowed = true", but again we
+					// want to prevent thread divergence.
+					
+					// A fit has been found, so this state is allowed for now.
+					__syncthreads();
+					allowed = allowed || (waves_cond && is_fit);
+				}
+			}
+
+			// A state that was once allowed has been dis-allowed
+			changed = changed || (waves[tid_base + c] && !allowed);
+			__syncthreads();
+			waves[tid_base + c] = allowed;
+		}
+
+		__syncthreads();
+		changes[tid] = changed;
+
+		tid += blockDim.x * gridDim.x;
+		tid_base = tid * num_patterns;
+	}
+}
+
 __global__
 void cudaCollapseWaveKernel(char* waves, int idx, int state, int num_patterns) {
-	unsigned tid = threadIdx.x;
+	unsigned tid = threadIdx.x + blockIdx.x * blockDim.x;
 	while (tid < num_patterns) {
 		// Set 1 if it is the intended state, 0 otherwise.
 		waves[idx + tid] = tid == state;
+		
+		tid += blockDim.x * gridDim.x;
+	}
+}
+
+__global__
+void cudaComputeEntropiesKernel(char* waves, int* entropies, int num_waves, int num_patterns) {
+	unsigned tid = threadIdx.x + blockIdx.x * blockDim.x;
+	unsigned tid_base = tid * num_patterns;
+	while (tid < num_waves) {
+		int total = 0;
+		for (int i=0; i < num_patterns; i++) {
+			total += waves[tid_base + i];
+		}
+
+		__syncthreads();
+		entropies[tid] = total;
 		
 		tid += blockDim.x * gridDim.x;
 	}
@@ -31,10 +142,54 @@ void cudaCollapseWaveKernel(char* waves, int idx, int state, int num_patterns) {
  * Host Interface Functions
  */
 
+bool cudaCallUpdateWavesKernel(char* waves, bool* fits, int* overlays, 
+								int waves_x, int waves_y, 
+								int num_patterns, int num_overlays) {
+	int total_work = waves_x * waves_y;
+	int numThreads = NUM_THREADS_1D(total_work);
+	int numBlocks = NUM_BLOCKS_1D(total_work, numThreads);
+
+	// NOTE: may need to pad this to power of 2
+	// Will be initialized in the kernel
+	bool* changes;
+	int* changed;
+	CUDA_CALL(cudaMalloc((void**)&changes, sizeof(bool) * total_work));
+	CUDA_CALL(cudaMalloc((void**)&changed, sizeof(int)));
+	
+	cudaUpdateWavesKernel<<<numBlocks, numThreads>>>(waves, fits, overlays, changes, 
+		waves_x, waves_y, num_patterns, num_overlays);
+
+	switch (numThreads) {
+	case 512: cudaReduceOrKernel<512> <<<numBlocks, numThreads>>> (changes, changed, total_work); break;
+	case 256: cudaReduceOrKernel<256> <<<numBlocks, numThreads>>> (changes, changed, total_work); break;
+	case 128: cudaReduceOrKernel<128> <<<numBlocks, numThreads>>> (changes, changed, total_work); break;
+	case  64: cudaReduceOrKernel< 64> <<<numBlocks, numThreads>>> (changes, changed, total_work); break;
+	case  32: cudaReduceOrKernel< 32> <<<numBlocks, numThreads>>> (changes, changed, total_work); break;
+	case  16: cudaReduceOrKernel< 16> <<<numBlocks, numThreads>>> (changes, changed, total_work); break;
+	case   8: cudaReduceOrKernel<  8> <<<numBlocks, numThreads>>> (changes, changed, total_work); break;
+	case   4: cudaReduceOrKernel<  4> <<<numBlocks, numThreads>>> (changes, changed, total_work); break;
+	case   2: cudaReduceOrKernel<  2> <<<numBlocks, numThreads>>> (changes, changed, total_work); break;
+	case   1: cudaReduceOrKernel<  1> <<<numBlocks, numThreads>>> (changes, changed, total_work); break;
+	}
+
+	int* host_changed = new int;
+	cudaMemcpy(host_changed, changed, sizeof(int), cudaMemcpyDeviceToHost);
+
+	bool is_changed = *host_changed > 0;
+	delete host_changed;
+	return is_changed;
+}
+
 // NOTE: Does not update entropy value, only updates waves
 void cudaCallCollapseWaveKernel(char* waves, int idx, int state, int num_patterns) {
 	int numThreads = NUM_THREADS_1D(num_patterns);
 	int numBlocks = NUM_BLOCKS_1D(num_patterns, numThreads);
 	cudaCollapseWaveKernel<<<numBlocks, numThreads>>>(waves, idx, state, num_patterns);
+}
+
+void cudaCallComputeEntropiesKernel(char* waves, int* entropies, int num_waves, int num_patterns) {
+	int numThreads = NUM_THREADS_1D(num_waves);
+	int numBlocks = NUM_BLOCKS_1D(num_waves, numThreads);
+	cudaComputeEntropiesKernel<<<numBlocks, numThreads>>>(waves, entropies, num_waves, num_patterns);
 }
 
