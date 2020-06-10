@@ -30,6 +30,59 @@ __device__ void warpReduceOr(volatile float* sdata, unsigned int tid) {
 }
 
 template <unsigned int blockSize>
+
+
+ __global__ 
+ void cudaClearKernel(char* waves, int* entropy, int shape, int num_patterns) {
+
+	 unsigned int wave = blockIdx.x*blockDim.x + threadIdx.x;
+	 unsigned int tid = threadIdx.x;
+
+	 while (tid < shape) {
+		if (wave < shape) {
+			for (int patt = 0; patt < num_patterns; patt++) {
+	
+				waves_[wave * num_patterns + patt] = true;
+			}
+		
+			entropy_[wave] = num_patterns;
+		}
+
+		tid += blockDim.x * gridDim.x;
+	}
+}
+
+__global__ 
+void cudaLowestEntropyKernel(int* entropy, int shape, int* min_val) { 
+    extern __shared__ float shmem[];
+
+    // Each thread loads one element from global to shared mem
+    unsigned int tid = threadIdx.x;
+    unsigned int idx = blockIdx.x*blockDim.x + threadIdx.x;
+
+        // Put in shared memory.
+		for (; idx < shape; idx += blockDim.x * gridDim.x){
+			shmem[tid] = 
+		}
+        
+		__syncthreads(); 
+		
+		// 
+        for (unsigned int j = blockDim.x / 2; j > 0; j >>= 1) {
+            if (tid < j && sdata[tid] > sdata[tid + j]) {
+                    sdata[tid] = sdata[tid + j];
+                }
+            }
+			__syncthreads();
+			
+	if (tid == 0){
+		atomicMin(max_abs_val, sdata[0]);
+	}
+	
+
+}
+
+
 __global__
 void cudaReduceOrKernel(bool* out_data, int* output, int length) {
 	__shared__ float data[blockSize];
@@ -186,6 +239,15 @@ bool cudaCallUpdateWavesKernel(char* waves, bool* fits, int* overlays,
 	}
 
 }
+ void cudaCallClearKernel(char* waves, int idx, int state, int num_patterns) {
+	int numThreads = NUM_THREADS_1D(num_patterns);
+	int numBlocks = NUM_BLOCKS_1D(num_patterns, numThreads);
+	cudaClearKernel<<<numBlocks, numThreads>>>(waves, idx, state, num_patterns);
+ }
+
+ void cudaCallLowestEntropyKernel(int* entropy, int shape, int* min_val) { 
+
+ }
 
 // NOTE: Does not update entropy value, only updates waves
 void cudaCallCollapseWaveKernel(char* waves, int idx, int state, int num_patterns) {

@@ -5,7 +5,7 @@
 // NOTE: These functions ARE NOT actually cuda kernels, they are a "middle-man"
 //		 which calls the real kernels that will be defined in cuwfc.cu
 
-void cudaCallClearKernel();
+void cudaCallClearKernel(char* waves, int idx, int state, int num_patterns);
 
 bool cudaCallUpdateWavesKernel(char* waves, bool* fits, int* overlays,
 								int waves_x, int waves_y, 
