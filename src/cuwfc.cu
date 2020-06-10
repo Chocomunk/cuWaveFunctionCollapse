@@ -33,7 +33,7 @@ template <unsigned int blockSize>
 
 
  __global__ 
- void cudaClearKernel(char* waves, int* entropy, int shape, int num_patterns) {
+ void cudaClearKernel(char* waves, int* entropies, int shape, int num_patterns) {
 
 	 unsigned int wave = blockIdx.x*blockDim.x + threadIdx.x;
 	 unsigned int tid = threadIdx.x;
@@ -42,43 +42,70 @@ template <unsigned int blockSize>
 		if (wave < shape) {
 			for (int patt = 0; patt < num_patterns; patt++) {
 	
-				waves_[wave * num_patterns + patt] = true;
+				waves[wave * num_patterns + patt] = true;
 			}
 		
-			entropy_[wave] = num_patterns;
+			entropies[wave] = num_patterns;
 		}
 
 		tid += blockDim.x * gridDim.x;
 	}
 }
 
+
 __global__ 
-void cudaLowestEntropyKernel(int* entropy, int shape, int* min_val) { 
+void cudaLowestEntropyKernel(int* entropies, int shape, int* lowest_entropy_idx) { 
+	// index of lowest entropy is "returned" to the lowest_entropy_idx variable.
+
     extern __shared__ float shmem[];
 
-    // Each thread loads one element from global to shared mem
     unsigned int tid = threadIdx.x;
     unsigned int idx = blockIdx.x*blockDim.x + threadIdx.x;
 
-        // Put in shared memory.
-		for (; idx < shape; idx += blockDim.x * gridDim.x){
-			shmem[tid] = 
-		}
-        
-		__syncthreads(); 
-		
-		// 
-        for (unsigned int j = blockDim.x / 2; j > 0; j >>= 1) {
-            if (tid < j && sdata[tid] > sdata[tid + j]) {
-                    sdata[tid] = sdata[tid + j];
-                }
-            }
-			__syncthreads();
-			
-	if (tid == 0){
-		atomicMin(max_abs_val, sdata[0]);
+
+	// Use each thread to transfer global entropy data into shared memory.
+	for (; idx < shape; idx += blockDim.x * gridDim.x) {
+		shmem[tid] = entropies[tid];
 	}
+	__syncthreads(); 
 	
+	/*
+	 * Do a reduction 
+	 * our operation : storing the minimum value (> 1) betweeen the two splits
+	 * NOTE: Consider any wave with entropy <= 1 to be collapsed
+	 */
+	for (unsigned int j = blockDim.x / 2; j > 0; j >>= 1) {
+
+		if (tid < j) {
+			/* 
+			 * Update lower half if:
+			 * the lower entropy is in second half OR 
+			 * entropy in first half is collapsed,
+			 *
+			 * AND the second half entropy is not collapsed
+			 */
+			if ((shmem[tid] > shmem[tid + j] || shmem[tid] <= 1) && shmem[tid + j] > 1) {
+				shmem[tid] = shmem[tid + j];
+				// store index as well?
+			}
+			// if both are collapsed, then mark the corresponding index as -1
+			else if (shmem[tid] <= 1 && shmem[tid + j] <= 1) {
+				shmem[tid] = -1;
+			}
+			// otherwise if the lower of the two entropies is in the first half, 
+			// keep it 
+		}
+		__syncthreads();
+	}
+	// shmem[0] should store the lowest entropy if there exists an uncollapsed wave,
+	// if all waves are collapsed, shmem[0] should be set to -1
+
+	
+	if (tid == 0){
+		// Storing index of into global variable passed into the kernel via 
+		// atomicAdd
+		atomicAdd(lowest_entropy_idx, shmem[0]);
+	}
 
 }
 
@@ -239,14 +266,16 @@ bool cudaCallUpdateWavesKernel(char* waves, bool* fits, int* overlays,
 	}
 
 }
- void cudaCallClearKernel(char* waves, int idx, int state, int num_patterns) {
+ void cudaCallClearKernel(char* waves, int* entropies, int shape, int num_patterns) {
 	int numThreads = NUM_THREADS_1D(num_patterns);
 	int numBlocks = NUM_BLOCKS_1D(num_patterns, numThreads);
-	cudaClearKernel<<<numBlocks, numThreads>>>(waves, idx, state, num_patterns);
+	cudaClearKernel<<<numBlocks, numThreads>>>(char* waves, int* entropies, int shape, int num_patterns);
  }
 
- void cudaCallLowestEntropyKernel(int* entropy, int shape, int* min_val) { 
-
+ void cudaCallLowestEntropyKernel(int* entropies, int shape, int num_patterns, int* lowest_entropy_idx) { 
+	int numThreads = NUM_THREADS_1D(num_patterns);
+	int numBlocks = NUM_BLOCKS_1D(num_patterns, numThreads);
+	cudaLowestEntropyKernel<<<numBlocks, numThreads>>>(int* entropy, int shape, int* lowest_entropy_idx);
  }
 
 // NOTE: Does not update entropy value, only updates waves
