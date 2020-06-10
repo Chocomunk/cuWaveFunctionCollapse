@@ -251,6 +251,7 @@ namespace wfc
 			// TODO: Pass in proper converted GPU data
 			observe_wave(lowest_entropy_idx, counts);
 			propagate(dev_overlays, dev_fit_table);
+			update_entropies();
 			lowest_entropy_idx = get_lowest_entropy();
 
 			iteration += 1;
@@ -338,8 +339,6 @@ namespace wfc
 
 			changed = *host_changed_ > 0;
 		}
-		
-		cudaCallComputeEntropiesKernel(dev_waves_, dev_entropy_, wave_shape.size, num_patterns);
 	}
 
 	bool* GpuModel::get_device_fit_table(std::vector<std::vector<int>>& fit_table) const {
@@ -392,5 +391,9 @@ namespace wfc
 		cudaMemcpy(host_waves_, dev_waves_, 
 			sizeof(char) * wave_shape.size * num_patterns, 
 			cudaMemcpyDeviceToHost);
+	}
+
+	void GpuModel::update_entropies() const {
+		cudaCallComputeEntropiesKernel(dev_waves_, dev_entropy_, wave_shape.size, num_patterns);
 	}
 }

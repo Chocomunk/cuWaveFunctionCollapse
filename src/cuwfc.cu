@@ -133,11 +133,12 @@ void cudaReduceOrKernel(bool* out_data, int* output, int length) {
 	if (tid == 0) atomicOr(output, data[0]);
 }
 
+template <class T>
 __device__
-void copyFits(bool* s_data, bool* fits, int length) {
+void copyArrayShmem(T* s_data, T* g_data, int length) {
 	unsigned tid = threadIdx.x + blockIdx.x * blockDim.x;
 	while (tid < length) {
-		s_data[tid] = fits[tid];
+		s_data[tid] = g_data[tid];
 		
 		tid += blockDim.x * gridDim.x;
 	}
@@ -149,8 +150,10 @@ void cudaUpdateWavesKernel(char* waves, bool* fits, int* overlays, bool* changes
 								int num_patterns, int num_overlays) {
 	// TODO: Use shared memory
 	extern __shared__ bool s_fits[];
-
-	copyFits(s_fits, fits, num_patterns * num_overlays * num_patterns);
+	int fits_length = num_patterns * num_overlays * num_patterns;
+	copyArrayShmem<bool>(s_fits, fits, fits_length);
+	int* s_overlays = (int*)(s_fits + sizeof(bool) * fits_length);
+	copyArrayShmem<int>(s_overlays, overlays, 2 * num_overlays);
 	
 	unsigned tid = threadIdx.x + blockIdx.x * blockDim.x;
 	unsigned tid_base = tid * num_patterns;
@@ -162,8 +165,8 @@ void cudaUpdateWavesKernel(char* waves, bool* fits, int* overlays, bool* changes
 			int c_idx = c * num_overlays * num_patterns;
 			bool allowed = false;
 			for (int o=0; o < num_overlays; o++) {
-				int o_x = overlays[2 * o];
-				int o_y = overlays[2 * o + 1];
+				int o_x = s_overlays[2 * o];
+				int o_y = s_overlays[2 * o + 1];
 				int o_idx = o * num_patterns;
 				int other_idx = tid + o_y * waves_x + o_x;
 				int other_base = other_idx * num_patterns;
@@ -246,9 +249,9 @@ void cudaCallUpdateWavesKernel(char* waves, bool* fits, int* overlays,
 	int total_work = waves_x * waves_y;
 	int numThreads = NUM_THREADS_1D(total_work);
 	int numBlocks = NUM_BLOCKS_1D(total_work, numThreads);
-	int fits_size = num_patterns * num_overlays * num_patterns;
+	int shmem_size = num_patterns * num_overlays * num_patterns + 2 * num_overlays;
 	
-	cudaUpdateWavesKernel<<<numBlocks, numThreads, fits_size>>>(
+	cudaUpdateWavesKernel<<<numBlocks, numThreads, shmem_size>>>(
 		waves, fits, overlays, changes, 
 		waves_x, waves_y, num_patterns, num_overlays);
 

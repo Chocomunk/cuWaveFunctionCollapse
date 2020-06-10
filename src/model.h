@@ -211,5 +211,7 @@ namespace wfc
 		int* get_device_overlays(std::vector<Pair> &overlays) const;
 
 		void apply_host_waves() const;
+
+		void update_entropies() const;
 	};
 }
