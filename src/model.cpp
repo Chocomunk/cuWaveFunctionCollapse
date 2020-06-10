@@ -254,13 +254,13 @@ namespace wfc
 			lowest_entropy_idx = get_lowest_entropy();
 
 			iteration += 1;
-			if (iteration % 1000 == 0)
-				std::cout << "iteration: " << iteration << std::endl;
+			//if (iteration % 1000 == 0)
+			//	std::cout << "iteration: " << iteration << std::endl;
 		}
 
 		// Update the host array with the device array
 		apply_host_waves();
-		std::cout << "Finished Algorithm" << std::endl;
+		std::cout << "Finished Algorithm in " << iteration << " iterations" << std::endl;
 	}
 
 	void GpuModel::get_superposition(const int row, const int col, std::vector<int>& patt_idxs) {

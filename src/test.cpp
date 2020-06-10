@@ -1,6 +1,7 @@
 #include "input.h"
 #include "wfc.h"
 #include <opencv2/opencv.hpp>
+#include <chrono>
 
 using namespace wfc;
 
@@ -60,79 +61,34 @@ int main(int argc, char** argv) {
 	std::vector<std::vector<int>> fit_table;
 	generate_fit_table(patterns, overlays, tile_dim, fit_table);
 
-	Pair p = Pair(width, height);
-	CpuModel model(p,
+	Pair out_shape = Pair(width, height);
+	CpuModel cpu_model(out_shape,
+	            patterns.size(), overlays.size(),
+	            tile_dim, periodic);
+	GpuModel gpu_model(out_shape,
 	            patterns.size(), overlays.size(),
 	            tile_dim, periodic);
 
 	// Shows all patterns
-	if (render) {
-		std::cout << "Pattern Viewer Controls:" << std::endl <<
-			"\tEsc: Quit and continue" << std::endl <<
-			"\tM: Next left pattern" << std::endl <<
-			"\t(Any Other Key): Next right pattern" << std::endl;
+	if (render)
+		show_patterns(cpu_model, patterns, overlays, fit_table);
 
-		bool break_all = false;
-		std::cout << std::endl;
+	// Run and time CPU and GPU models
+	auto t1 = std::chrono::high_resolution_clock::now();
+	cpu_model.generate(overlays, counts, fit_table);
+	auto t2 = std::chrono::high_resolution_clock::now();
+	gpu_model.generate(overlays, counts, fit_table);
+	auto t3 = std::chrono::high_resolution_clock::now();
 
-		for (int pat_idx1 = 0; pat_idx1 < model.num_patterns; pat_idx1++) {
-			cv::Mat scaled1;
-			auto patt1 = patterns[pat_idx1];
-			cv::resize(patt1, scaled1, cv::Size(128, 128), 0.0, 0.0, cv::INTER_AREA);
-			std::cout << "Pattern: " << pat_idx1 << " | Pattern count: " << patterns[pat_idx1] << std::endl;
-
-			for (int overlay_idx = 0; overlay_idx < model.overlay_count; overlay_idx++) {
-				size_t index = pat_idx1 * model.overlay_count + overlay_idx;
-				auto valid_patterns = fit_table[index];
-				Pair overlay = overlays[overlay_idx];
-				Pair opposite = overlays[(overlay_idx + 2) % model.overlay_count];
-				std::cout << "Valid Patterns: ";
-				for (int pattern_2 : valid_patterns) std::cout << pattern_2 << ", ";
-				std::cout << std::endl;
-				std::cout << "Overlay: " << overlay << " | Opposite: " << opposite << std::endl;
-
-				bool break_part = false;
-
-				for (int pat_idx2 = 0; pat_idx2 < model.num_patterns; pat_idx2++) {
-					auto patt2 = patterns[pat_idx2];
-					cv::Mat scaled2;
-					cv::resize(patt2, scaled2, cv::Size(128, 128), 0.0, 0.0, cv::INTER_AREA);
-					cv::Mat comb;
-					cv::hconcat(scaled1, scaled2, comb);
-					std::cout << "template: " << pat_idx1 << ", conv: " << pat_idx2 << ", result:" << std::endl;
-
-					std::cout << "    " << "Table: " << (std::find(valid_patterns.begin(), valid_patterns.end(),
-					                                               pat_idx2) != valid_patterns.end()) << " | Calc: "
-						<< overlay_fit(patt1, patt2, overlay, model.dim) << std::endl;
-
-					std::cout << "    " << patterns_equal(patt1, patt2) << ": " << "Patterns are equal" << std::endl;
-
-					cv::imshow("comparison", comb);
-					int k = cv::waitKey(0);
-					if (k == 27) {
-						break_all = true;
-						break_part = true;
-						break;
-					}
-					else if (k == int('m')) {
-						break_part = true;
-						break;
-					}
-					// else if (k == int('n')) break;
-				}
-				std::cout << std::endl;
-				if (break_all || break_part) break;
-			}
-			if (break_all) break;
-		}
-	}
-
-	model.generate(overlays, counts, fit_table);
+	auto cpu_time = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
+	auto gpu_time = std::chrono::duration_cast<std::chrono::microseconds>(t3 - t2).count();
+	std::cout << "Total CPU time: " << cpu_time << std::endl;
+	std::cout << "Total GPU time: " << gpu_time << std::endl;
 
 	// Initialize blank output image
 	cv::Mat result = cv::Mat(width, width, template_imgs[0].type());
 
-	render_image(model, patterns, result);
+	render_image(gpu_model, patterns, result);
 
 	cv::resize(result, result, cv::Size(800, 800), 0.0, 0.0, cv::INTER_AREA);
 	cv::imshow("result", result);
