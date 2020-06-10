@@ -1,6 +1,7 @@
 #include "model.h"
 #include "cuda_runtime.h"
 #include "helper_cuda.h"
+#include "cuwfc.cuh"
 
 namespace wfc
 {
@@ -219,9 +220,9 @@ namespace wfc
 
 		// Initialize board into complete superposition, and pick a random wave to collapse
 		clear(fit_table);
-		Pair lowest_entropy_idx = Pair(rand_int(wave_shape.x), rand_int(wave_shape.y));
+		int lowest_entropy_idx = rand_int(wave_shape.size);
 		int iteration = 0;
-		while ((iteration_limit < 0 || iteration < iteration_limit) && lowest_entropy_idx.non_negative()) {
+		while ((iteration_limit < 0 || iteration < iteration_limit) && lowest_entropy_idx > -1) {
 			/* Standard wfc Loop:
 			 *		1. Observe a wave and collapse it's state
 			 *		2. Propagate the changes throughout the board and update superposition
@@ -233,7 +234,7 @@ namespace wfc
 			// TODO: Pass in proper converted GPU data
 			observe_wave(lowest_entropy_idx, counts);
 			propagate(dev_overlays, dev_fit_table);
-			get_lowest_entropy(lowest_entropy_idx);
+			lowest_entropy_idx = get_lowest_entropy();
 
 			iteration += 1;
 			if (iteration % 1000 == 0)
@@ -267,7 +268,7 @@ namespace wfc
 		}
 	}
 
-	void GpuModel::get_lowest_entropy(Pair& idx) {
+	int GpuModel::get_lowest_entropy() const {
 		// TODO: Replace with CUDA reduce min kernel
 		
 		int r = -1; int c = -1;
@@ -282,11 +283,11 @@ namespace wfc
 				r = wave_idx / wave_shape.x; c = wave_idx % wave_shape.x;
 			}
 		}
-		idx.x = c;; idx.y = r;
+		return r * wave_shape.x + c;
 	}
 
-	void GpuModel::observe_wave(Pair& pos, std::vector<int>& counts) {
-		const int idx_row_col_patt_base = get_idx(pos, wave_shape, num_patterns, 0);
+	void GpuModel::observe_wave(int idx, std::vector<int>& counts) const {
+		const int idx_row_col_patt_base = idx * num_patterns;
 
 		// Determines superposition of states and their total frequency counts.
 		int possible_patterns_sum = 0;
@@ -308,29 +309,29 @@ namespace wfc
 			}
 		}
 		collapsed_index -= 1;	// Counter-action against additional increment from for-loop
+		assert(collapsed_index > 0 && collapsed_index < num_patterns);
 
 		// TODO: Update wave in the GPU data
-
-		// Bans all other states, since we have collapsed to a single state.
-		for (int patt_idx = 0; patt_idx < num_patterns; patt_idx++) {
-			if (waves_[patt_idx + idx_row_col_patt_base] != (patt_idx == collapsed_index))
-				ban_waveform(Waveform(pos, patt_idx));
-		}
-
-		// Assigns the final state of this position.
-		observed_[get_idx(pos, wave_shape, 1, 0)] = collapsed_index;
+		cudaCallCollapseWaveKernel(waves_, idx,collapsed_index, num_patterns);
 	}
 
-	void GpuModel::propagate(int* overlays, bool* fit_table) {
+	void GpuModel::propagate(int* overlays, bool* fit_table) const {
 		// TODO: Call CUDA Kernel and recieve overlays externally
+		bool changed = true;
+		while (changed) {
+			changed = cudaCallUpdateWavesKernel(waves_, fit_table, overlays,
+				wave_shape.x, wave_shape.y, num_patterns, overlay_count);
+		}
+		
+		cudaCallComputeEntropiesKernel(waves_, entropy_, wave_shape.size, num_patterns);
 	}
 
-	bool* GpuModel::get_device_fit_table(std::vector<std::vector<int>>& fit_table) {
-		size_t length = num_patterns * overlay_count * num_patterns;
+	bool* GpuModel::get_device_fit_table(std::vector<std::vector<int>>& fit_table) const {
+		int length = num_patterns * overlay_count * num_patterns;
 		
 		// Rebuild fit_table from adjacency list to edge-matrix in CPU first
 		bool* host_fit_table = new bool[length];
-		memset(host_fit_table, 0, num_patterns * overlay_count * num_patterns);
+		memset(host_fit_table, 0, sizeof(bool) * length);
 		for (int c=0; c < num_patterns; c++) {
 			for (int o=0; o < overlay_count; o++) {
 				int base_idx = c * overlay_count * num_patterns + o * num_patterns;
@@ -340,7 +341,7 @@ namespace wfc
 			}
 		}
 
-		// Transfer new fit_table to GPU devicce
+		// Transfer new fit_table to GPU device
 		bool* dev_fit_table;
 		CUDA_CALL(cudaMalloc((void**)&dev_fit_table, sizeof(bool) * length));
 		CUDA_CALL(cudaMemcpy(dev_fit_table, host_fit_table, sizeof(bool) * length, cudaMemcpyHostToDevice));
@@ -351,7 +352,7 @@ namespace wfc
 	}
 
 	// Returns a "pair" array where paired ints are sequential
-	int* GpuModel::get_device_overlays(std::vector<Pair> &overlays) {
+	int* GpuModel::get_device_overlays(std::vector<Pair> &overlays) const {
 		// Because of the extra "size" parameter that we dont want, make a CPU
 		// array to copy to GPU. May remove "size" parameter in the future
 		int* host_overlays = new int[overlay_count * 2];

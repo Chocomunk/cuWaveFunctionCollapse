@@ -183,13 +183,13 @@ namespace wfc
 		/**
 		 * \brief Finds the wave with lowest entropy and stores it's position in idx
 		 */
-		void get_lowest_entropy(Pair &idx);
+		int get_lowest_entropy();
 		
 		/**
 		 * \brief Performs an observation on the wave at the given position and
 		 * collapses it to a single state.
 		 */
-		void observe_wave(Pair &pos, std::vector<int> &counts);
+		void observe_wave(int idx, std::vector<int> &counts);
 		
 		/**
 		 * \brief Iteratively collapses waves in the tilemap until no conflicts exist.
