@@ -41,15 +41,24 @@ __global__
 void cudaLowestEntropyKernel(int* entropies, int num_waves, int* lowest_entropy_idx) { 
 	// index of lowest entropy is "returned" to the lowest_entropy_idx variable.
 
-    extern __shared__ float shmem[];
+	// In order to return the index of the lowest entropy, we need to keep track
+	// of both the indices and the values in shared memory
+    extern __shared__ float sh_entropies[];
+    extern __shared__ float sh_indices[];
 
     unsigned int tid = threadIdx.x;
-    unsigned int idx = blockIdx.x*blockDim.x + threadIdx.x;
+    unsigned int idx = blockIdx.x*blockDim.x + tid;
 
 
 	// Use each thread to transfer global entropy data into shared memory.
 	for (; idx < num_waves; idx += blockDim.x * gridDim.x) {
-		shmem[tid] = entropies[tid];
+
+		sh_entropies[tid] = entropies[tid];
+
+		// store the corresponding entropy index, so using idx as opposed to the 
+		// thread index 
+		sh_indices[tid] = idx;
+	
 	}
 	__syncthreads(); 
 	
@@ -68,29 +77,40 @@ void cudaLowestEntropyKernel(int* entropies, int num_waves, int* lowest_entropy_
 			 *
 			 * AND the second half entropy is not collapsed
 			 */
-			if ((shmem[tid] > shmem[tid + j] || shmem[tid] <= 1) && shmem[tid + j] > 1) {
-				shmem[tid] = shmem[tid + j];
-				// store index as well?
+			if ((sh_entropies[tid] > sh_entropies[tid + j] || sh_entropies[tid] <= 1) 
+					&& sh_entropies[tid + j] > 1) {
+						
+				sh_entropies[tid] = sh_entropies[tid + j];
+
+				// store corresponding index as well
+				sh_indices[tid] = sh_indices[tid + j];
+
 			}
-			// if both are collapsed, then mark the corresponding index as -1
-			else if (shmem[tid] <= 1 && shmem[tid + j] <= 1) {
-				shmem[tid] = -1;
+			// If both are collapsed, then mark the entropy and its 
+			// corresponding index as -1
+			else if (sh_entropies[tid] <= 1 && sh_entropies[tid + j] <= 1) {
+				sh_entropies[tid] = -1;
+				sh_indices[tid] = -1;
+
 			}
-			// otherwise if the lower of the two entropies is in the first half, 
-			// keep it 
+			// Otherwise the lower of the two entropies is in the first half, 
+			// so keep it 
 		}
 		__syncthreads();
 	}
-	// shmem[0] should store the lowest entropy if there exists an uncollapsed wave,
-	// if all waves are collapsed, shmem[0] should be set to -1
-
+	/* At the end of the reduction, sh_entropies[0] should store the lowest 
+	 * entropy if there exists an uncollapsed wave, whose corresponding index is 
+	 * in sh_indices[0].
+	 *
+	 * If all waves are collapsed, sh_entropies[0] as well as its index 
+	 * sh_indices[0] should be set to -1.
+	 */
 	
 	if (tid == 0){
-		// Storing index of into global variable passed into the kernel via 
-		// atomicAdd
-		atomicAdd(lowest_entropy_idx, shmem[0]);
+		// Storing index of lowest entropy into global variable passed into the 
+		// kernel via atomicAdd.
+		atomicAdd(lowest_entropy_idx, sh_indices[0]);
 	}
-
 }
 
 template <unsigned int blockSize>
