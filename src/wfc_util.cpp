@@ -55,9 +55,7 @@ namespace wfc
 				std::vector<int> valid_patterns;
 				for (size_t i = 0; i < num_patterns; i++) {
 					if (overlay_fit(center_pattern, patterns[i], overlay, dim))
-					{
 						valid_patterns.push_back(i);
-					}
 				}
 				fit_table.push_back(valid_patterns);
 			}

@@ -10,14 +10,15 @@ int main(int argc, char** argv) {
 	int tile_dim = 3;
 	int rotate = 1;
 	int periodic = 1;
-	int width = 64;
-	int height = 64;
+	int width = 16;
+	int height = 16;
 	int render = 0;
+	int show_patts = 0;
 	char* out_name;
 
 	if (!(argc > 2)) {
 		std::cout << "Usage {arg_name (options) | default}:" << std::endl <<
-			"\twfc {image folder} {tile dim | 3} {rotate? (0/1) | 1} {periodic? (0/1) | 1} {width | 64} {height | 64} {render? (0/1) | 0}"
+			"\twfc {image folder} {tile dim | 3} {rotate? (0/1) | 1} {periodic? (0/1) | 1} {width | 64} {height | 64} {render? (0/1) | 0} {show patterns? (0/1) | 0}"
 			<< std::endl;
 		return -1;
 	}
@@ -33,13 +34,15 @@ int main(int argc, char** argv) {
 		width = atoi(argv[5]); // denotes tile width
 	if (argc > 6)
 		height = atoi(argv[6]); // denotes tile height;
-	if (argc > 7) {
-		out_name = argv[7];
-	} else {
-		out_name = "result.png";
-	}
+	if (argc > 7)
+		render = atoi(argv[7]); // render toggle
 	if (argc > 8)
-		render = atoi(argv[8]); // render toggle
+		show_patts = atoi(argv[8]); // render toggle
+	if (argc > 9) {
+		out_name = argv[9];
+	} else {
+		out_name = "result";
+	}
 
 	// The set of overlays describing how to compare two patterns. Stored
 	// as an (x,y) shift. Shape: [O]
@@ -70,7 +73,7 @@ int main(int argc, char** argv) {
 	            tile_dim, periodic);
 
 	// Shows all patterns
-	if (render)
+	if (show_patts)
 		show_patterns(cpu_model, patterns, overlays, fit_table);
 
 	// Run and time CPU and GPU models
@@ -80,23 +83,42 @@ int main(int argc, char** argv) {
 	gpu_model.generate(overlays, counts, fit_table);
 	auto t3 = std::chrono::high_resolution_clock::now();
 
+	// Print out CPU and GPU times.
 	auto cpu_time = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
 	auto gpu_time = std::chrono::duration_cast<std::chrono::microseconds>(t3 - t2).count();
 	std::cout << "Total CPU time: " << cpu_time << std::endl;
 	std::cout << "Total GPU time: " << gpu_time << std::endl;
 
 	// Initialize blank output image
-	cv::Mat result = cv::Mat(width, width, template_imgs[0].type());
+	cv::Mat result_cpu = cv::Mat(width, width, template_imgs[0].type());
+	cv::Mat result_gpu = cv::Mat(width, width, template_imgs[0].type());
 
-	render_image(gpu_model, patterns, result);
+	// Render and output CPU image
+	render_image(cpu_model, patterns, result_cpu);
 
-	cv::resize(result, result, cv::Size(800, 800), 0.0, 0.0, cv::INTER_AREA);
-	cv::imshow("result", result);
-	cv::waitKey(0);
+	cv::resize(result_cpu, result_cpu, cv::Size(800, 800), 0.0, 0.0, cv::INTER_AREA);
+	if (render) {
+		cv::imshow("result", result_cpu);
+		cv::waitKey(0);
+	}
 
 	std::ostringstream outputDir;
-	outputDir << "results/" << out_name;
-	cv::imwrite(outputDir.str(), result);
+	outputDir << "results/" << out_name << "_cpu.png";
+	cv::imwrite(outputDir.str(), result_cpu);
+	std::cout << outputDir.str() << std::endl;
+
+	// Render and output GPU image
+	render_image(gpu_model, patterns, result_gpu);
+
+	cv::resize(result_gpu, result_gpu, cv::Size(800, 800), 0.0, 0.0, cv::INTER_AREA);
+	if (render) {
+		cv::imshow("result", result_gpu);
+		cv::waitKey(0);
+	}
+
+	outputDir.clear();
+	outputDir << "results/" << out_name << "_gpu.png";
+	cv::imwrite(outputDir.str(), result_gpu);
 	std::cout << outputDir.str() << std::endl;
 
 	return 0;

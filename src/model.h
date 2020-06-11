@@ -159,6 +159,9 @@ namespace wfc
 		GpuModel(Pair &output_shape, const int num_patterns, const int overlay_count, 
 			const char dim, const bool periodic=false, const int iteration_limit=-1);
 
+		/**
+		 * \brief Cleans up all dynamically allocated GPU and CPU arrays
+		 */
 		~GpuModel();
 		
 		/**
@@ -181,18 +184,22 @@ namespace wfc
 	private:
 		int* dev_entropy_;
 		char* dev_waves_;
-		bool* dev_changes_;
+		int* dev_workspace_;
 		int* dev_changed_;
+		int* dev_is_collapsed_;
 
 		char* host_waves_;
+		char* host_single_wave_;
 		int* host_changed_;
+		int* host_lowest_entropy;
+		int* host_is_collapsed;
 
-		int changes_length_;
+		int waves_padded_length_;
 		
 		/**
 		 * \brief Finds the wave with lowest entropy and stores it's position in idx
 		 */
-		int get_lowest_entropy() const;
+		void get_lowest_entropy() const;
 		
 		/**
 		 * \brief Performs an observation on the wave at the given position and
@@ -206,12 +213,52 @@ namespace wfc
 		 */
 		void propagate(int* overlays, bool* fit_table) const;
 
+		/**
+		 * \brief Moves a given fit_table to GPU device memory
+		 * \return The pointer to the GPU fit_table
+		 */
 		bool* get_device_fit_table(std::vector<std::vector<int>>& fit_table) const;
 
+		/**
+		 * \brief Moves a given overlay set to GPU device memory
+		 * \return The pointer to the GPU overlay set
+		 */
 		int* get_device_overlays(std::vector<Pair> &overlays) const;
 
+		/**
+		 * \brief Moves generated waves from GPU array to CPU array
+		 */
 		void apply_host_waves() const;
 
+		/**
+		 * \brief Updates the device entropy array with the device waves array.
+		 * Each entropy element should be a count of the valid patterns in the
+		 * corresponding element of the waves array.
+		 */
 		void update_entropies() const;
+
+		/**
+		 * \brief Does a reduction over the entropies to see if the wavefunction
+		 * has fully collapsed (all entropies are 1)
+		 */
+		void check_completed() const;
+
+		/**
+		 * \brief Copies the device waves array to CPU and prints it legibly.
+		 * For debugging purposes only.
+		 */
+		void print_waves() const;
+
+		/**
+		 * \brief Copies the device entropy array to CPU and prints it legibly
+		 * For debugging purposes only.
+		 */
+		void print_entropy() const;
+
+		/**
+		 * \brief Copies the device workspace array to CPU and prints it legibly
+		 * For debugging purposes only.
+		 */
+		void print_workspace() const;
 	};
 }
