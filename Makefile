@@ -1,7 +1,7 @@
 # C++ Compiler
 CC = /usr/bin/g++-7
 CFLAGS = -g -Wall
-OPENCV = opencv4
+OPENCV = opencv
 LDFLAGS = `pkg-config --libs --cflags $(OPENCV)`
 
 # CUDA Compiler

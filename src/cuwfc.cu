@@ -243,7 +243,6 @@ namespace wfc
 					for (int other_patt=0; other_patt < num_patterns; other_patt++) {
 						bool waves_cond = valid && waves[other_base + other_patt];
 						bool is_fit = fits[o_idx + other_patt];
-						__syncthreads();
 
 						// Any fitting state will allow our center.
 						side_allowed |= waves_cond && is_fit;
@@ -254,11 +253,9 @@ namespace wfc
 				}
 
 				// A state that was once allowed has been dis-allowed
-				__syncthreads();
 				changed |= (start_allowed != allowed);
 
 				// Cache the new wave state into shared memory.
-				__syncthreads();
 				state_allowed[idx_base + c] = allowed;
 			}
 
