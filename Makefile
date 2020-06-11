@@ -1,7 +1,7 @@
 # C++ Compiler
-CC = g++
+CC = /usr/bin/g++-7
 CFLAGS = -g -Wall
-OPENCV = opencv
+OPENCV = opencv4
 LDFLAGS = `pkg-config --libs --cflags $(OPENCV)`
 
 # CUDA Compiler
@@ -77,11 +77,14 @@ build: dirs $(TARGET)
 
 .PHONY: test
 test:
-	bin/wfc tiles/red/ 2 1 1 4 4 0 0 red
-	bin/wfc tiles/spirals/ 3 1 1 4 4 0 0 spirals
-	bin/wfc tiles/bricks/ 3 0 1 4 4 0 0 bricks
-	bin/wfc tiles/dungeons/ 3 0 1 4 4 0 0 dungeons
-	bin/wfc tiles/paths/ 3 0 1 4 4 0 0 paths
+	@echo "Running Red Tests:"
+	bin/wfc tiles/red/ 2 1 1 16 16 0 0 red
+	@echo "\nRunning Spirals Tests:"
+	bin/wfc tiles/spirals/ 3 1 1 16 16 0 0 spirals
+	@echo "\nRunning Dungeons Tests:"
+	bin/wfc tiles/dungeons/ 3 0 1 16 16 0 0 dungeons
+	@echo "\nRunning Paths Tests:"
+	bin/wfc tiles/paths/ 3 0 1 16 16 0 0 paths
 
 $(OBJDIR)/%.o: $(SRCDIR)/%.cu 
 	@echo "Compiling cuda objects: $@"
@@ -89,7 +92,7 @@ $(OBJDIR)/%.o: $(SRCDIR)/%.cu
 
 $(OBJDIR)/%.o: $(SRCDIR)/%.cpp 
 	@echo "Compiling cpp objects: $@"
-	$(CC) $(CFLAGS) -MP -MMD -c $< -o $@ $(LDFLAGS)
+	$(CC) $(CFLAGS) -MP -MMD -c $< -o $@ $(LDFLAGS) -I$(CUDA_INC_PATH)
 
 $(TARGET): $(OBJECTS)
 	@echo "Linking: $@"

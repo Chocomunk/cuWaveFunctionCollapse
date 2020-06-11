@@ -64,8 +64,6 @@ int main(int argc, char** argv) {
 	std::vector<std::vector<int>> fit_table;
 	generate_fit_table(patterns, overlays, tile_dim, fit_table);
 
-	std::cout << "We made it" << std::endl;
-
 	Pair out_shape = Pair(width, height);
 	CpuModel cpu_model(out_shape,
 	            patterns.size(), overlays.size(),
@@ -118,6 +116,7 @@ int main(int argc, char** argv) {
 		cv::waitKey(0);
 	}
 
+	outputDir.str("");
 	outputDir.clear();
 	outputDir << "results/" << out_name << "_gpu.png";
 	cv::imwrite(outputDir.str(), result_gpu);

@@ -38,9 +38,9 @@ All tiles in the output are initialized to a superposition of all states in the 
 ## GPU Implementation
 Our goal was to reimplement the Parallel WaveFunction Collapse algorithm in CUDA, utilizing a GPUs massively parallel architecture to improve runtime.
 
-The CPU implementation of the WFC model is limited by a polynomial runtime and high memory costs as the dimension of the 2D tile increases. This is due to the fact that several subroutines of the algorithm require access to the entire "board": notably, initializing the wave, finding the region of lowest entropy, and the propogation step. 
+The CPU implementation of the WFC model has a highly polynomial runtime and high memory costs as the dimension of the 2D tile increases. Most of the high runtime comes from the multiple steps over each state in each tile that the propogator may compute.
 
-The advantage of working with a GPUs parallel archicture is that we can reduce the runtime of these subprocesses. 
+The advantage of working with a GPUs parallel archicture is that we can compute on many tiles at once. 
 We implemented our own CUDA kernels for these processes to replace with the CPU.
 
 ### Clear Kernel
