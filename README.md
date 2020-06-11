@@ -1,11 +1,11 @@
-# Wave Function Collapse: Procedural Tile Generation
+# GPU Accelerated Wave Function Collapse: Procedural Tile Generation
 
-This is a C++ and (separate) python port of https://github.com/mxgmn/WaveFunctionCollapse.
+This is a CUDA/C++ port of https://github.com/mxgmn/WaveFunctionCollapse.
 
 All contained template images also come from https://github.com/mxgmn/WaveFunctionCollapse.
 
 ## Getting Started
-To build the cpp project with g++ on linux, run:
+To build the project with g++ and nvcc on linux, run:
 
 `make build`
 
