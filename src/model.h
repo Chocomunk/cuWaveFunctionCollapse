@@ -181,6 +181,14 @@ namespace wfc
 		 */
 		void clear(std::vector<std::vector<int>> &fit_table) override;
 
+		// Performance Analysis
+		int obs_time = 0;
+		int pro_time = 0;
+		int upd_time = 0;
+		int low_time = 0;
+		int prop_call_time = 0;
+		int prop_copy_time = 0;
+
 	private:
 		int* dev_entropy_;
 		char* dev_waves_;
@@ -199,19 +207,19 @@ namespace wfc
 		/**
 		 * \brief Finds the wave with lowest entropy and stores it's position in idx
 		 */
-		void get_lowest_entropy() const;
+		void get_lowest_entropy();
 		
 		/**
 		 * \brief Performs an observation on the wave at the given position and
 		 * collapses it to a single state.
 		 */
-		void observe_wave(int idx, std::vector<int> &counts) const;
+		void observe_wave(int idx, std::vector<int> &counts);
 		
 		/**
 		 * \brief Iteratively collapses waves in the tilemap until no conflicts exist.
 		 * Meant to be used after collapsing a wave by observing it.
 		 */
-		void propagate(int* overlays, bool* fit_table) const;
+		void propagate(int* overlays, bool* fit_table);
 
 		/**
 		 * \brief Moves a given fit_table to GPU device memory

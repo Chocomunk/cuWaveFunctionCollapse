@@ -3,6 +3,8 @@
 #include "helper_cuda.h"
 #include "cuwfc.cuh"
 
+#include <chrono>
+
 namespace wfc
 {
 
@@ -266,8 +268,9 @@ namespace wfc
 		// Initialize board into complete superposition, and pick a random wave to collapse
 		clear(fit_table);
 		*host_lowest_entropy = rand_int(wave_shape.size);
+
 		int iteration = 0;
-		while ((iteration_limit < 0 || iteration < iteration_limit) && !(*host_is_collapsed)) {
+		while ((iteration_limit < 0 || iteration < iteration_limit) && *host_lowest_entropy < wave_shape.size) {
 			/* Standard wfc Loop:
 			 *		1. Observe a wave and collapse it's state
 			 *		2. Propagate the changes throughout the board and update superposition
@@ -277,11 +280,22 @@ namespace wfc
 			 *		   observation.
 			 */
 			// TODO: Pass in proper converted GPU data
+
+			auto t1 = std::chrono::high_resolution_clock::now();
 			observe_wave(*host_lowest_entropy, counts);	// Collapse a wave
-			propagate(dev_overlays, dev_fit_table);			// Propogate through all waves
+			auto t2 = std::chrono::high_resolution_clock::now();
+			propagate(dev_overlays, dev_fit_table);			// Propagate through all waves
+			auto t3 = std::chrono::high_resolution_clock::now();
 			update_entropies();								// Assign entropies
-			check_completed();								// Reduce into host_is_collapsed
+			auto t4 = std::chrono::high_resolution_clock::now();
+			//check_completed();								// Reduce into host_is_collapsed
 			get_lowest_entropy();							// Reduce into host_lowest_entropy
+			auto t5 = std::chrono::high_resolution_clock::now();
+
+			obs_time += std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
+			pro_time += std::chrono::duration_cast<std::chrono::microseconds>(t3 - t2).count();
+			upd_time += std::chrono::duration_cast<std::chrono::microseconds>(t4 - t3).count();
+			low_time += std::chrono::duration_cast<std::chrono::microseconds>(t5 - t4).count();
 
 			iteration += 1;
 			if (iteration % 1000 == 0)
@@ -294,6 +308,12 @@ namespace wfc
 		// Update the host array with the device array
 		apply_host_waves();
 		std::cout << "Finished Algorithm in " << iteration << " iterations" << std::endl;
+		std::cout << "Total observation time: " << obs_time << std::endl;
+		std::cout << "Total propagation time: " << pro_time << std::endl;
+		std::cout << "Total update time: " << upd_time << std::endl;
+		std::cout << "Total lowest_entropy time: " << low_time << std::endl;
+		std::cout << "Total propagation call time: " << prop_call_time << std::endl;
+		std::cout << "Total propagation copy time: " << prop_copy_time << std::endl;
 	}
 
 	void GpuModel::get_superposition(const int row, const int col, std::vector<int>& patt_idxs) {
@@ -312,12 +332,12 @@ namespace wfc
 		cudaCallClearKernel(dev_waves_, dev_entropy_, wave_shape.size, num_patterns);
 	}
 
-	void GpuModel::get_lowest_entropy() const {
+	void GpuModel::get_lowest_entropy() {
 		cudaCallLowestEntropyKernel(dev_entropy_, dev_workspace_, waves_padded_length_);
 		CUDA_CALL(cudaMemcpy(host_lowest_entropy, dev_workspace_ + 1, sizeof(int), cudaMemcpyDeviceToHost));
 	}
 
-	void GpuModel::observe_wave(int idx, std::vector<int>& counts) const {
+	void GpuModel::observe_wave(int idx, std::vector<int>& counts) {
 		const int idx_base = idx * num_patterns;
 
 		CUDA_CALL(cudaMemcpy(host_single_wave_, (dev_waves_ + idx_base), 
@@ -347,17 +367,25 @@ namespace wfc
 		cudaCallCollapseWaveKernel(dev_waves_, idx,collapsed_index, num_patterns);
 	}
 
-	void GpuModel::propagate(int* overlays, bool* fit_table) const {
+	void GpuModel::propagate(int* overlays, bool* fit_table) {
 		// Continue updating waves in GPU as long as there are changes
 		bool changed = true;
 		while (changed) {
+			auto t1 = std::chrono::high_resolution_clock::now();
 			cudaCallUpdateWavesKernel(dev_waves_, fit_table, overlays,
 				wave_shape.x, wave_shape.y, num_patterns, overlay_count,
 				dev_workspace_, waves_padded_length_, dev_changed_);
+			auto t2 = std::chrono::high_resolution_clock::now();
+			cudaDeviceSynchronize();
 
 			// Determine whether there were changes from reduction output
 			CUDA_CALL(cudaMemcpy(host_changed_, dev_changed_, sizeof(int), cudaMemcpyDeviceToHost));
 			changed = *host_changed_ > 0;
+			auto t3 = std::chrono::high_resolution_clock::now();
+
+			prop_call_time += std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
+			prop_copy_time += std::chrono::duration_cast<std::chrono::microseconds>(t3 - t2).count();
+
 		}
 	}
 

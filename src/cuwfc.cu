@@ -219,6 +219,7 @@ namespace wfc
 			for (int c = 0; c < num_patterns; c++)
 				total_states += waves[tid_base + c];
 			bool locked = (total_states <= 1);
+			//bool locked = false;
 
 			// Individually check each pattern to see if it is allowed.
 			for (int c = 0; c < num_patterns; c++) {
