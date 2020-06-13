@@ -311,9 +311,14 @@ namespace wfc
 		std::cout << "Total observation time: " << obs_time << std::endl;
 		std::cout << "Total propagation time: " << pro_time << std::endl;
 		std::cout << "Total update time: " << upd_time << std::endl;
-		std::cout << "Total lowest_entropy time: " << low_time << std::endl;
+		std::cout << "Total lowest_entropy time: " << low_time << std::endl << std::endl;
+
 		std::cout << "Total propagation call time: " << prop_call_time << std::endl;
-		std::cout << "Total propagation copy time: " << prop_copy_time << std::endl;
+		std::cout << "Total propagation copy time: " << prop_copy_time << std::endl << std::endl;
+
+		std::cout << "Total observation copy time: " << obs_copy_time << std::endl;
+		std::cout << "Total observation cpu time: " << obs_cpu_time << std::endl;
+		std::cout << "Total observation gpu time: " << obs_gpu_time << std::endl << std::endl;
 	}
 
 	void GpuModel::get_superposition(const int row, const int col, std::vector<int>& patt_idxs) {
@@ -340,8 +345,10 @@ namespace wfc
 	void GpuModel::observe_wave(int idx, std::vector<int>& counts) {
 		const int idx_base = idx * num_patterns;
 
+		auto t1 = std::chrono::high_resolution_clock::now();
 		CUDA_CALL(cudaMemcpy(host_single_wave_, (dev_waves_ + idx_base), 
 			sizeof(char) * num_patterns, cudaMemcpyDeviceToHost));
+		auto t2 = std::chrono::high_resolution_clock::now();
 
 		// Determines superposition of states and their total frequency counts.
 		int possible_patterns_sum = 0;
@@ -362,9 +369,15 @@ namespace wfc
 		}
 		collapsed_index -= 1;	// Counter-action against additional increment from for-loop
 		assert(collapsed_index >= 0 && collapsed_index < num_patterns);
+		auto t3 = std::chrono::high_resolution_clock::now();
 
 		// Update wave in the GPU data
 		cudaCallCollapseWaveKernel(dev_waves_, idx,collapsed_index, num_patterns);
+		auto t4 = std::chrono::high_resolution_clock::now();
+
+		obs_copy_time += std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
+		obs_cpu_time += std::chrono::duration_cast<std::chrono::microseconds>(t3 - t2).count();
+		obs_gpu_time += std::chrono::duration_cast<std::chrono::microseconds>(t4 - t3).count();
 	}
 
 	void GpuModel::propagate(int* overlays, bool* fit_table) {

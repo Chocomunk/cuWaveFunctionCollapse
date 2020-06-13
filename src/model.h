@@ -186,8 +186,13 @@ namespace wfc
 		int pro_time = 0;
 		int upd_time = 0;
 		int low_time = 0;
+
 		int prop_call_time = 0;
 		int prop_copy_time = 0;
+
+		int obs_copy_time = 0;
+		int obs_cpu_time = 0;
+		int obs_gpu_time = 0;
 
 	private:
 		int* dev_entropy_;

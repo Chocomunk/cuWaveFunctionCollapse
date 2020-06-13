@@ -42,8 +42,8 @@ namespace wfc
 	void generate_neighbor_overlay(std::vector<Pair> &out) {
 		out.clear();
 		out.emplace_back(-1,  0);
-		out.emplace_back(1,  0);
 		out.emplace_back(0,  1);
+		out.emplace_back(1,  0);
 		out.emplace_back(0, -1);
 	}
 
