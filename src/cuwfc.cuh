@@ -1,19 +1,21 @@
 #pragma once
 
+#define INT_BITS sizeof(int) * 8
+
 namespace wfc
 {
 	/**
 	 * \brief Resets all waves to perfect superpositions and updates the entropy accordingly.
 	 */
-	void cudaCallClearKernel(char* waves, int* entropies, int num_waves, int num_patterns);
+	void cudaCallClearKernel(int* waves, int* entropies, int num_waves, int num_patterns, int num_patt_ints);
 
 	/**
 	 * \brief Update each tile's states for 1 iteration. Run an or-reduce to determine
 	 * if any tile has changed.
 	 */
-	void cudaCallUpdateWavesKernel(char* waves, bool* fits, int* overlays,
+	void cudaCallUpdateWavesKernel(int* waves, int* fits, int* overlays,
 									int waves_x, int waves_y, 
-									int num_patterns, int num_overlays,
+									int num_patterns, int num_overlays, int num_pat_ints,
 									int* workspace, int work_size, int* changed);
 
 	/**
@@ -30,7 +32,7 @@ namespace wfc
 	 * \brief Count the number of valid states in each tile, this is the entropy for
 	 * that tile.
 	 */
-	void cudaCallComputeEntropiesKernel(char* waves, int* entropies, int num_waves, int num_patterns);
+	void cudaCallComputeEntropiesKernel(int* waves, int* entropies, int num_waves, int num_patt_ints);
 
 	/**
 	 * \brief Run an or-reduction to determine if any tile is not fully collapsed.

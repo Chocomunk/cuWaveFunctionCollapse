@@ -196,7 +196,7 @@ namespace wfc
 
 	private:
 		int* dev_entropy_;
-		char* dev_waves_;
+		int* dev_waves_;
 		int* dev_workspace_;
 		int* dev_changed_;
 		int* dev_is_collapsed_;
@@ -208,6 +208,7 @@ namespace wfc
 		int* host_is_collapsed;
 
 		int waves_padded_length_;
+		int num_pattern_ints_;
 		
 		/**
 		 * \brief Finds the wave with lowest entropy and stores it's position in idx
@@ -224,13 +225,13 @@ namespace wfc
 		 * \brief Iteratively collapses waves in the tilemap until no conflicts exist.
 		 * Meant to be used after collapsing a wave by observing it.
 		 */
-		void propagate(int* overlays, bool* fit_table);
+		void propagate(int* overlays, int* fit_table);
 
 		/**
 		 * \brief Moves a given fit_table to GPU device memory
 		 * \return The pointer to the GPU fit_table
 		 */
-		bool* get_device_fit_table(std::vector<std::vector<int>>& fit_table) const;
+		int* get_device_fit_table(std::vector<std::vector<int>>& fit_table) const;
 
 		/**
 		 * \brief Moves a given overlay set to GPU device memory

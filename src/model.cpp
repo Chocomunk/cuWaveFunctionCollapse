@@ -220,10 +220,11 @@ namespace wfc
 		srand(time(nullptr));
 
 		waves_padded_length_ = next_pow_2(wave_shape.size);
+		num_pattern_ints_ = (num_patterns + INT_BITS - 1) / INT_BITS;
 
 		// Allocate collections.
 		CUDA_CALL(cudaMalloc((void**)&dev_entropy_, sizeof(int) * waves_padded_length_));
-		CUDA_CALL(cudaMalloc((void**)&dev_waves_, sizeof(char) * wave_shape.size * num_patterns));
+		CUDA_CALL(cudaMalloc((void**)&dev_waves_, sizeof(int) * wave_shape.size * num_pattern_ints_));
 		CUDA_CALL(cudaMalloc((void**)&dev_workspace_, sizeof(int) * waves_padded_length_));
 		CUDA_CALL(cudaMalloc((void**)&dev_changed_, sizeof(int)));
 		CUDA_CALL(cudaMalloc((void**)&dev_is_collapsed_, sizeof(int)));
@@ -262,7 +263,7 @@ namespace wfc
 	void GpuModel::generate(std::vector<Pair>& overlays, std::vector<int>& counts, std::vector<std::vector<int>>& fit_table) {
 		std::cout << "Called Generate" << std::endl;
 		// Convert fit_table and overlays to GPU data for propagate kernel
-		bool* dev_fit_table = get_device_fit_table(fit_table);
+		int* dev_fit_table = get_device_fit_table(fit_table);
 		int* dev_overlays = get_device_overlays(overlays);
 
 		// Initialize board into complete superposition, and pick a random wave to collapse
@@ -334,7 +335,7 @@ namespace wfc
 	}
 
 	void GpuModel::clear(std::vector<std::vector<int>>& fit_table) {
-		cudaCallClearKernel(dev_waves_, dev_entropy_, wave_shape.size, num_patterns);
+		cudaCallClearKernel(dev_waves_, dev_entropy_, wave_shape.size, num_patterns, num_pattern_ints_);
 	}
 
 	void GpuModel::get_lowest_entropy() {
@@ -372,7 +373,13 @@ namespace wfc
 		auto t3 = std::chrono::high_resolution_clock::now();
 
 		// Update wave in the GPU data
-		cudaCallCollapseWaveKernel(dev_waves_, idx,collapsed_index, num_patterns);
+		//cudaCallCollapseWaveKernel(dev_waves_, idx,collapsed_index, num_patterns);
+		// TODO: evaluate difference between memset and kernel
+		int* wave = dev_waves_ + collapsed_index * num_pattern_ints_;
+		int pat_char = collapsed_index / 8;
+		int char_idx = collapsed_index % 8;
+		cudaMemset(wave, 0, sizeof(int) * num_pattern_ints_);
+		cudaMemset(wave + pat_char, 1 << char_idx, 1);
 		auto t4 = std::chrono::high_resolution_clock::now();
 
 		obs_copy_time += std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
@@ -380,13 +387,14 @@ namespace wfc
 		obs_gpu_time += std::chrono::duration_cast<std::chrono::microseconds>(t4 - t3).count();
 	}
 
-	void GpuModel::propagate(int* overlays, bool* fit_table) {
+	void GpuModel::propagate(int* overlays, int* fit_table) {
 		// Continue updating waves in GPU as long as there are changes
 		bool changed = true;
 		while (changed) {
 			auto t1 = std::chrono::high_resolution_clock::now();
 			cudaCallUpdateWavesKernel(dev_waves_, fit_table, overlays,
-				wave_shape.x, wave_shape.y, num_patterns, overlay_count,
+				wave_shape.x, wave_shape.y, 
+				num_patterns, overlay_count,num_pattern_ints_,
 				dev_workspace_, waves_padded_length_, dev_changed_);
 			auto t2 = std::chrono::high_resolution_clock::now();
 			cudaDeviceSynchronize();
@@ -402,26 +410,31 @@ namespace wfc
 		}
 	}
 
-	bool* GpuModel::get_device_fit_table(std::vector<std::vector<int>>& fit_table) const {
-		int length = num_patterns * overlay_count * num_patterns;
+	int* GpuModel::get_device_fit_table(std::vector<std::vector<int>>& fit_table) const {
+		int length = num_patterns * overlay_count * num_pattern_ints_;
 		
 		// Rebuild fit_table from adjacency list to edge-matrix in CPU first
-		bool* host_fit_table = new bool[length];
-		memset(host_fit_table, 0, sizeof(bool) * length);
+		// Fit table comes as: [Center, Overlay] = Allowed Neighbors
+		int* host_fit_table = new int[length];
+		memset(host_fit_table, 0, sizeof(int) * length);
 		for (int c=0; c < num_patterns; c++) {
+			int pat_int = c / INT_BITS;
+			int int_idx = c % INT_BITS;
+			int flag = 1 << int_idx;
 			for (int o=0; o < overlay_count; o++) {
-				int base_idx = c * overlay_count + o;
-				auto valid_patterns = fit_table[base_idx];
-				for (int other_patt: valid_patterns) {
-					host_fit_table[base_idx * num_patterns + other_patt] = true;
-				}
+				auto valid_patterns = fit_table[c * overlay_count + o];
+				int base_idx = o * num_patterns * num_pattern_ints_;
+
+				// Reshape to: [Overlay, Neighbor] = Allowed Centers
+				for (int other: valid_patterns)
+					host_fit_table[base_idx + other * num_pattern_ints_ + pat_int] |= flag;
 			}
 		}
 
 		// Transfer new fit_table to GPU device
-		bool* dev_fit_table;
-		CUDA_CALL(cudaMalloc((void**)&dev_fit_table, sizeof(bool) * length));
-		CUDA_CALL(cudaMemcpy(dev_fit_table, host_fit_table, sizeof(bool) * length, cudaMemcpyHostToDevice));
+		int* dev_fit_table;
+		CUDA_CALL(cudaMalloc((void**)&dev_fit_table, sizeof(int) * length));
+		CUDA_CALL(cudaMemcpy(dev_fit_table, host_fit_table, sizeof(int) * length, cudaMemcpyHostToDevice));
 
 		// Free CPU matrix and return device pointer
 		delete[] host_fit_table;
@@ -457,7 +470,7 @@ namespace wfc
 	}
 
 	void GpuModel::update_entropies() const {
-		cudaCallComputeEntropiesKernel(dev_waves_, dev_entropy_, wave_shape.size, num_patterns);
+		cudaCallComputeEntropiesKernel(dev_waves_, dev_entropy_, wave_shape.size, num_pattern_ints_);
 	}
 
 	void GpuModel::check_completed() const {

@@ -1054,6 +1054,10 @@ inline void __getLastCudaError(const char* errorMessage, const char* file, const
 #define MAX(a,b) (a > b ? a : b)
 #endif
 
+#ifndef MIN
+#define MIN(a,b) (a > b ? a : b)
+#endif
+
 // Float To Int conversion
 inline int ftoi(float value) {
     return (value >= 0 ? (int)(value + 0.5) : (int)(value - 0.5));

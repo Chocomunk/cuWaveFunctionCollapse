@@ -13,12 +13,14 @@
 // Otherwise, we go out of bounds when reducing within the warp.
 #define SHMEM_SIZE(blocksize) ((blocksize) < 64 ? 64 : blocksize)
 
+#define I_MIN(x,y) ((x < y) ? x : y)
+
 // MIN and MIN_IDX implementations that are limited to staying above 1 (for entropy)
 #define L_MIN(x,y) ((x <= 1) ? y : ((y <= 1) ? x : ((x < y) ? x : y)))
 #define L_MIN_IDX(x,y,x_i,y_i) ((x <= 1) ? y_i : ((y <= 1) ? x_i : ((x < y) ? x_i : y_i)))
 
 // TODO: make this architecture friendly by checking architecture for max threads.
-#define NUM_THREADS_1D(x) ((x) > 1024 ? 1024 : (x))
+#define NUM_THREADS_1D(x) ((x) > 512 ? 512 : (x))
 #define NUM_BLOCKS_1D(total_threads, num_threads) ((total_threads + num_threads - 1) / (num_threads))
 
 namespace wfc
@@ -31,20 +33,27 @@ namespace wfc
 ////////////////////////////////////////////////////////////////////////////////
 
 	 __global__ 
-	 void cudaClearKernel(char* waves, int* entropies, int num_waves, int num_patterns) {
+	 void cudaClearKernel(int* waves, int* entropies, int num_waves, int num_patterns, int num_patt_ints) {
 
 		 unsigned tid = blockIdx.x*blockDim.x + threadIdx.x;
-		 int tid_base = tid * num_patterns;
+		 int tid_base = tid * num_patt_ints;
 
 		// Reset all tiles to perfect superposition and update entropy to reflect this.
 		 while (tid < num_waves) {
-			for (int patt = 0; patt < num_patterns; patt++)
-				waves[tid_base + patt] = true;
-		
+			int patt_int_idx = 0;
+			for (int pat_idx = 0; pat_idx < num_patterns; pat_idx += INT_BITS) {
+				// If remaining patterns > INT_BITS, then set all bits in this int
+				// Otherwise, only set the bits for the remaining patterns.
+				int bitv_size = MIN((num_patterns - pat_idx), INT_BITS);
+				waves[tid_base + patt_int_idx] = (uint32_t)(((uint64_t)1 << bitv_size) - 1);
+				patt_int_idx++;
+			}
+
+			__syncthreads();
 			entropies[tid] = num_patterns;
 
 			tid += blockDim.x * gridDim.x;
-			tid_base = tid * num_patterns;
+			tid_base = tid * num_patt_ints;
 		}
 	}
 
@@ -203,6 +212,80 @@ namespace wfc
 	}
 
 	__global__
+	void _cudaUpdateWavesKernel(int* waves, int* fits, int* overlays, int* workspace,
+									int waves_x, int waves_y, 
+									int num_patterns, int num_overlays, int num_pat_ints) {
+		extern __shared__ int s_waves[];
+		int* s_other = s_waves + blockDim.x * num_pat_ints * sizeof(int);
+	 	int* s_masks = s_other + blockDim.x * num_pat_ints * sizeof(int);
+
+		unsigned idx_base = threadIdx.x * num_pat_ints;
+		unsigned tid = threadIdx.x + blockIdx.x * blockDim.x;
+		unsigned tid_base = tid * num_pat_ints;
+
+	 	// TODO: Experiment with __syncthreads()
+		while (tid < waves_x * waves_y) {
+
+			// Update center tile state in shared memory
+			for (int i=0; i < num_pat_ints; i++)
+				s_waves[idx_base + i] = waves[tid_base + i];
+
+			__syncthreads();
+
+			// Loop over overlays between the center and neighbor
+			for (int o=0; o < num_overlays; o++) {
+				int o_x = overlays[2 * o];
+				int o_y = overlays[2 * o + 1];
+				int other_idx = tid + o_x * waves_x + o_y;
+				int other_base = other_idx * num_pat_ints;
+				bool valid = other_idx >= 0 && other_idx < waves_x * waves_y;
+
+				__syncthreads();
+
+				// Initialize mask and cache neighbor state
+				for (int i=0; i < num_pat_ints; i++) {
+					s_other[idx_base + i] = valid ? waves[other_base + i] : 0;
+					s_masks[idx_base + i] = 0;
+				}
+
+				__syncthreads();
+
+				// Loop over patterns for the neighbor
+				for (int p=0; p < num_patterns; p++) {
+					int pat_int = p / INT_BITS;
+					int int_idx = p % INT_BITS;
+					bool pat_valid = (1 << int_idx) & s_other[idx_base + pat_int];
+					int base_idx = o * num_patterns * num_pat_ints + p * num_pat_ints;
+
+					// Update mask by allowed states for this pattern
+					for (int i=0; i < num_pat_ints; i++)
+						s_masks[idx_base + i] |= pat_valid ? fits[base_idx + i] : 0;
+					__syncthreads();
+				}
+
+				// Apply the mask to the center state
+				// TODO: Check for bank conflicts here
+				for (int i=0; i < num_pat_ints; i++)
+					s_waves[idx_base + i] &= s_masks[idx_base + i];
+			}
+
+			// Check if state has changed and update global memory
+			bool changed = false;
+			for (int i=0; i < num_pat_ints; i++) {
+				int bits = waves[tid_base + i];
+				changed = changed || s_waves[idx_base + i] != bits;
+				waves[tid_base + i] = s_waves[idx_base + i];
+			}
+
+			__syncthreads();
+			workspace[tid] = changed;
+
+			tid += blockDim.x * gridDim.x;
+			tid_base = tid * num_pat_ints;
+		}
+	 }
+
+	__global__
 	void cudaUpdateWavesKernel(char* waves, bool* fits, int* overlays, int* workspace,
 									int waves_x, int waves_y, 
 									int num_patterns, int num_overlays) {
@@ -286,15 +369,15 @@ namespace wfc
 	}
 
 	__global__
-	void cudaComputeEntropiesKernel(char* waves, int* entropies, int num_waves, int num_patterns) {
+	void cudaComputeEntropiesKernel(int* waves, int* entropies, int num_waves, int num_patt_ints) {
 		unsigned tid = threadIdx.x + blockIdx.x * blockDim.x;
-		unsigned tid_base = tid * num_patterns;
+		unsigned tid_base = tid * num_patt_ints;
 
 		// Count up the valid states in the tile, this is our entropy.
 		while (tid < num_waves) {
 			int total = 0;
-			for (int i=0; i < num_patterns; i++)
-				total += waves[tid_base + i];
+			for (int i=0; i < num_patt_ints; i++)
+				total += __popc(waves[tid_base + i]);
 
 			__syncthreads();
 			entropies[tid] = total;
@@ -343,24 +426,24 @@ namespace wfc
 		}
 	 }
 
-	 void cudaCallClearKernel(char* waves, int* entropies, int num_waves, int num_patterns) {
+	 void cudaCallClearKernel(int* waves, int* entropies, int num_waves, int num_patterns, int num_patt_ints) {
 		int numThreads = NUM_THREADS_1D(num_waves);
 		int numBlocks = NUM_BLOCKS_1D(num_waves, numThreads);
-		cudaClearKernel<<<numBlocks, numThreads>>>(waves, entropies, num_waves, num_patterns);
+		cudaClearKernel<<<numBlocks, numThreads>>>(waves, entropies, num_waves, num_patterns, num_patt_ints);
 	 }
 
-	void cudaCallUpdateWavesKernel(char* waves, bool* fits, int* overlays,
+	void cudaCallUpdateWavesKernel(int* waves, int* fits, int* overlays,
 									int waves_x, int waves_y, 
-									int num_patterns, int num_overlays,
+									int num_patterns, int num_overlays, int num_pat_ints,
 									int* workspace, int work_size, int* changed) {
 		int total_work = waves_x * waves_y;
 		int numThreads = NUM_THREADS_1D(total_work);
 		int numBlocks = NUM_BLOCKS_1D(total_work, numThreads);
-		int shmem_size = sizeof(char) * numThreads * num_patterns;
+		int shmem_size = sizeof(char) * numThreads * num_pat_ints * 3;
 		
-		cudaUpdateWavesKernel<<<numBlocks, numThreads, shmem_size>>>(
+		_cudaUpdateWavesKernel<<<numBlocks, numThreads, shmem_size>>>(
 			waves, fits, overlays, workspace, 
-			waves_x, waves_y, num_patterns, num_overlays);
+			waves_x, waves_y, num_patterns, num_overlays, num_pat_ints);
 
 		// The workspace now stores whether each tile was changed, reduce that into
 		// a final "did the board change?"
@@ -406,10 +489,10 @@ namespace wfc
 		cudaCollapseWaveKernel<<<numBlocks, numThreads>>>(waves, idx, state, num_patterns);
 	}
 
-	void cudaCallComputeEntropiesKernel(char* waves, int* entropies, int num_waves, int num_patterns) {
+	void cudaCallComputeEntropiesKernel(int* waves, int* entropies, int num_waves, int num_patt_ints) {
 		int numThreads = NUM_THREADS_1D(num_waves);
 		int numBlocks = NUM_BLOCKS_1D(num_waves, numThreads);
-		cudaComputeEntropiesKernel<<<numBlocks, numThreads>>>(waves, entropies, num_waves, num_patterns);
+		cudaComputeEntropiesKernel<<<numBlocks, numThreads>>>(waves, entropies, num_waves, num_patt_ints);
 	}
 
 	void cudaCallIsCollapsedKernel(int* entropies, int* workspace, int* is_collapsed, int num_waves) {
