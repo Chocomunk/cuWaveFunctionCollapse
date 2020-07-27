@@ -497,7 +497,7 @@ namespace wfc
 				for (int p=0; p < num_patterns; p++) {
 					int pat_int = p / INT_BITS;
 					int int_idx = p % INT_BITS;
-					std::cout << (int)(bool)((1 << int_idx) & host_waves_[r_c + pat_int]) << " ";
+					std::cout << (int)(bool)((1 << int_idx) & host_waves_[r_c + pat_int]);
 				}
 				//for (int i=0; i < num_pattern_ints_; i++)
 				//	std::cout << std::bitset<INT_BITS>(host_waves_[r_c + i]) << " ";
@@ -507,7 +507,6 @@ namespace wfc
 		}
 	}
 
-	// TODO: Update to bitvec
 	void GpuModel::print_entropy() const {
 		// This normally isn't supposed to be on CPU, so we have to allocate a
 		// new array just to accomodate it. Don't use this in final version
@@ -527,7 +526,6 @@ namespace wfc
 		delete[] h_e;
 	}
 
-	// TODO: Update to bitvec
 	void GpuModel::print_workspace() const {
 		// This normally isn't supposed to be on CPU, so we have to allocate a
 		// new array just to accomodate it. Don't use this in final version.

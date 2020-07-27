@@ -40,15 +40,6 @@ namespace wfc
 
 		// Reset all tiles to perfect superposition and update entropy to reflect this.
 		 while (tid < num_waves) {
-			//int patt_int_idx = 0;
-			//for (int pat_idx = 0; pat_idx < num_patterns; pat_idx += INT_BITS) {
-			//	// If remaining patterns > INT_BITS, then set all bits in this int
-			//	// Otherwise, only set the bits for the remaining patterns.
-			//	int bitv_size = MIN((num_patterns - pat_idx), INT_BITS);
-			//	waves[tid_base + patt_int_idx] = (uint32_t)(((uint64_t)1 << bitv_size) - 1);
-			//	patt_int_idx++;
-			//}
-
 			for (int i = 0; i < num_patt_ints; i++)
 				waves[tid_base + i] = -1;
 
@@ -298,78 +289,6 @@ namespace wfc
 			x_pos = tid % waves_x, y_pos = tid / waves_x;
 		}
 	 }
-
-	__global__
-	void cudaUpdateWavesKernel(char* waves, bool* fits, int* overlays, int* workspace,
-									int waves_x, int waves_y, 
-									int num_patterns, int num_overlays) {
-		extern __shared__ char state_allowed[];
-
-		unsigned idx_base = threadIdx.x * num_patterns;
-		unsigned tid = threadIdx.x + blockIdx.x * blockDim.x;
-		unsigned tid_base = tid * num_patterns;
-		bool changed = false;
-		
-		while (tid < waves_x * waves_y) {
-			// Begin by counting the existing states to determine if this tile is "locked"
-			int total_states = 0;
-			for (int c = 0; c < num_patterns; c++)
-				total_states += waves[tid_base + c];
-			bool locked = (total_states <= 1);
-			//bool locked = false;
-
-			// Individually check each pattern to see if it is allowed.
-			for (int c = 0; c < num_patterns; c++) {
-				int c_idx = c * num_overlays * num_patterns;
-				bool start_allowed = waves[tid_base + c];
-				bool allowed = start_allowed;
-
-				// A pattern must have a valid fit on ALL neighboring sides.
-				for (int o=0; o < num_overlays; o++) {
-					int o_x = overlays[2 * o];
-					int o_y = overlays[2 * o + 1];
-					int o_idx = c_idx + o * num_patterns;
-					int other_idx = tid + o_x * waves_x + o_y;
-					int other_base = other_idx * num_patterns;
-					bool valid = other_idx >= 0 && other_idx < waves_x * waves_y;
-
-					// If out center is against an edge, we say the side with the
-					// edge allows all states.
-					bool side_allowed = locked || !valid;
-
-					// For a given side, only 1 state is required to be a valid fit.
-					for (int other_patt=0; other_patt < num_patterns; other_patt++) {
-						bool waves_cond = valid && waves[other_base + other_patt];
-						bool is_fit = fits[o_idx + other_patt];
-
-						// Any fitting state will allow our center.
-						side_allowed |= waves_cond && is_fit;
-					}
-
-					// All sides must be allowed.
-					allowed &= side_allowed;
-				}
-
-				// A state that was once allowed has been dis-allowed
-				changed |= (start_allowed != allowed);
-
-				// Cache the new wave state into shared memory.
-				state_allowed[idx_base + c] = allowed;
-			}
-
-			// Update the workspace to indicate whether this tile has changed.
-			__syncthreads();
-			workspace[tid] = !locked && changed;
-
-			// Update the waves with new states from shared memory.
-			__syncthreads();
-			for (int c = 0; c < num_patterns; c++)
-				waves[tid_base + c] = state_allowed[idx_base + c];
-
-			tid += blockDim.x * gridDim.x;
-			tid_base = tid * num_patterns;
-		}
-	}
 
 	__global__
 	void cudaCollapseWaveKernel(char* waves, int idx, int state, int num_patterns) {
