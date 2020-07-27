@@ -225,6 +225,7 @@ namespace wfc
 		unsigned idx_base = threadIdx.x * num_pat_ints;
 		unsigned tid = threadIdx.x + blockIdx.x * blockDim.x;
 		unsigned tid_base = tid * num_pat_ints;
+		unsigned x_pos = tid % waves_x, y_pos = tid / waves_x;
 
 	 	// TODO: Experiment with __syncthreads()
 		while (tid < waves_x * waves_y) {
@@ -242,9 +243,13 @@ namespace wfc
 			for (int o=0; o < num_overlays; o++) {
 				int o_x = overlays[2 * o];
 				int o_y = overlays[2 * o + 1];
-				int other_idx = tid + o_x * waves_x + o_y;
+				int other_x = x_pos + o_x;
+				int other_y = y_pos + o_y;
+				int other_idx = other_y * waves_x + other_x;
 				int other_base = other_idx * num_pat_ints;
-				bool valid = other_idx >= 0 && other_idx < waves_x * waves_y;
+
+				bool valid = other_x >= 0 && other_x < waves_x  &&
+							 other_y >= 0 && other_y < waves_y;
 
 				__syncthreads();
 
@@ -290,6 +295,7 @@ namespace wfc
 
 			tid += blockDim.x * gridDim.x;
 			tid_base = tid * num_pat_ints;
+			x_pos = tid % waves_x, y_pos = tid / waves_x;
 		}
 	 }
 

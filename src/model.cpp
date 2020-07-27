@@ -281,15 +281,9 @@ namespace wfc
 			 *		   lowest entropy (most likely to be observed) for the next
 			 *		   observation.
 			 */
-			// TODO: Pass in proper converted GPU data
-
-			std::cout << "Before Observe" << std::endl;
-			print_waves();
 			
 			auto t1 = std::chrono::high_resolution_clock::now();
 			observe_wave(*host_lowest_entropy, counts);	// Collapse a wave
-			std::cout << "After Observe" << std::endl;
-			print_waves();
 			auto t2 = std::chrono::high_resolution_clock::now();
 			propagate(dev_overlays, dev_fit_table);			// Propagate through all waves
 			auto t3 = std::chrono::high_resolution_clock::now();
@@ -380,7 +374,6 @@ namespace wfc
 		}
 		collapsed_index -= 1;	// Counter-action against additional increment from for-loop
 		assert(collapsed_index >= 0 && collapsed_index < num_patterns);
-		std::cout << "Wave idx, Pattern: " << idx << ", " << collapsed_index << std::endl;
 		auto t3 = std::chrono::high_resolution_clock::now();
 
 		// Update wave in the GPU data
@@ -389,7 +382,6 @@ namespace wfc
 		int* wave = dev_waves_ + idx * num_pattern_ints_;
 		int pat_char = collapsed_index / 8;
 		int char_idx = collapsed_index % 8;
-		std::cout << pat_char << ", " << char_idx << std::endl;
 		CUDA_CALL(cudaMemset(wave, 0, sizeof(int) * num_pattern_ints_));
 		CUDA_CALL(cudaMemset((char*)wave + pat_char, 1 << char_idx, 1));
 		auto t4 = std::chrono::high_resolution_clock::now();
@@ -402,8 +394,6 @@ namespace wfc
 	void GpuModel::propagate(int* overlays, int* fit_table) {
 		// Continue updating waves in GPU as long as there are changes
 		bool changed = true;
-		std::cout << "Propogate Start" << std::endl;
-		print_waves();
 		while (changed) {
 			auto t1 = std::chrono::high_resolution_clock::now();
 			cudaCallUpdateWavesKernel(dev_waves_, fit_table, overlays,
@@ -420,10 +410,7 @@ namespace wfc
 
 			prop_call_time += std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
 			prop_copy_time += std::chrono::duration_cast<std::chrono::microseconds>(t3 - t2).count();
-
-			print_waves();
 		}
-		std::cout << "Propogation Complete" << std::endl;
 	}
 
 	int* GpuModel::get_device_fit_table(std::vector<std::vector<int>>& fit_table) const {
@@ -520,6 +507,7 @@ namespace wfc
 		}
 	}
 
+	// TODO: Update to bitvec
 	void GpuModel::print_entropy() const {
 		// This normally isn't supposed to be on CPU, so we have to allocate a
 		// new array just to accomodate it. Don't use this in final version
@@ -539,6 +527,7 @@ namespace wfc
 		delete[] h_e;
 	}
 
+	// TODO: Update to bitvec
 	void GpuModel::print_workspace() const {
 		// This normally isn't supposed to be on CPU, so we have to allocate a
 		// new array just to accomodate it. Don't use this in final version.
