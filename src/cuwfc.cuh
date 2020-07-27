@@ -1,6 +1,6 @@
 #pragma once
 
-#define INT_BITS sizeof(int) * 8
+#define INT_BITS (32)
 
 namespace wfc
 {

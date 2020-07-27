@@ -40,14 +40,17 @@ namespace wfc
 
 		// Reset all tiles to perfect superposition and update entropy to reflect this.
 		 while (tid < num_waves) {
-			int patt_int_idx = 0;
-			for (int pat_idx = 0; pat_idx < num_patterns; pat_idx += INT_BITS) {
-				// If remaining patterns > INT_BITS, then set all bits in this int
-				// Otherwise, only set the bits for the remaining patterns.
-				int bitv_size = MIN((num_patterns - pat_idx), INT_BITS);
-				waves[tid_base + patt_int_idx] = (uint32_t)(((uint64_t)1 << bitv_size) - 1);
-				patt_int_idx++;
-			}
+			//int patt_int_idx = 0;
+			//for (int pat_idx = 0; pat_idx < num_patterns; pat_idx += INT_BITS) {
+			//	// If remaining patterns > INT_BITS, then set all bits in this int
+			//	// Otherwise, only set the bits for the remaining patterns.
+			//	int bitv_size = MIN((num_patterns - pat_idx), INT_BITS);
+			//	waves[tid_base + patt_int_idx] = (uint32_t)(((uint64_t)1 << bitv_size) - 1);
+			//	patt_int_idx++;
+			//}
+
+			for (int i = 0; i < num_patt_ints; i++)
+				waves[tid_base + i] = -1;
 
 			__syncthreads();
 			entropies[tid] = num_patterns;
@@ -216,8 +219,8 @@ namespace wfc
 									int waves_x, int waves_y, 
 									int num_patterns, int num_overlays, int num_pat_ints) {
 		extern __shared__ int s_waves[];
-		int* s_other = s_waves + blockDim.x * num_pat_ints * sizeof(int);
-	 	int* s_masks = s_other + blockDim.x * num_pat_ints * sizeof(int);
+		int* s_other = s_waves + blockDim.x * num_pat_ints;
+	 	int* s_masks = s_other + blockDim.x * num_pat_ints;
 
 		unsigned idx_base = threadIdx.x * num_pat_ints;
 		unsigned tid = threadIdx.x + blockIdx.x * blockDim.x;
@@ -227,8 +230,11 @@ namespace wfc
 		while (tid < waves_x * waves_y) {
 
 			// Update center tile state in shared memory
-			for (int i=0; i < num_pat_ints; i++)
-				s_waves[idx_base + i] = waves[tid_base + i];
+			for (int i=0; i < num_pat_ints; i++) {
+				int temp = waves[tid_base + i];
+				s_waves[idx_base + i] = temp;
+			}
+				//s_waves[idx_base + i] = waves[tid_base + i];
 
 			__syncthreads();
 
@@ -245,7 +251,7 @@ namespace wfc
 				// Initialize mask and cache neighbor state
 				for (int i=0; i < num_pat_ints; i++) {
 					s_other[idx_base + i] = valid ? waves[other_base + i] : 0;
-					s_masks[idx_base + i] = 0;
+					s_masks[idx_base + i] = valid ? 0 : -1;
 				}
 
 				__syncthreads();
@@ -258,8 +264,9 @@ namespace wfc
 					int base_idx = o * num_patterns * num_pat_ints + p * num_pat_ints;
 
 					// Update mask by allowed states for this pattern
-					for (int i=0; i < num_pat_ints; i++)
-						s_masks[idx_base + i] |= pat_valid ? fits[base_idx + i] : 0;
+					for (int i=0; i < num_pat_ints; i++) {
+						s_masks[idx_base + i] |= (pat_valid ? fits[base_idx + i] : 0);
+					}
 					__syncthreads();
 				}
 
@@ -270,6 +277,7 @@ namespace wfc
 			}
 
 			// Check if state has changed and update global memory
+			// TODO: Experiment with ILP
 			bool changed = false;
 			for (int i=0; i < num_pat_ints; i++) {
 				int bits = waves[tid_base + i];
@@ -439,7 +447,7 @@ namespace wfc
 		int total_work = waves_x * waves_y;
 		int numThreads = NUM_THREADS_1D(total_work);
 		int numBlocks = NUM_BLOCKS_1D(total_work, numThreads);
-		int shmem_size = sizeof(char) * numThreads * num_pat_ints * 3;
+		int shmem_size = sizeof(int) * numThreads * num_pat_ints * 3;
 		
 		_cudaUpdateWavesKernel<<<numBlocks, numThreads, shmem_size>>>(
 			waves, fits, overlays, workspace, 

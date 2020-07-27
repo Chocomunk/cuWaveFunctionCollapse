@@ -201,8 +201,8 @@ namespace wfc
 		int* dev_changed_;
 		int* dev_is_collapsed_;
 
-		char* host_waves_;
-		char* host_single_wave_;
+		int* host_waves_;
+		int* host_single_wave_;
 		int* host_changed_;
 		int* host_lowest_entropy;
 		int* host_is_collapsed;

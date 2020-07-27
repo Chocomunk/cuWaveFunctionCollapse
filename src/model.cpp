@@ -4,6 +4,7 @@
 #include "cuwfc.cuh"
 
 #include <chrono>
+#include <bitset>
 
 namespace wfc
 {
@@ -229,8 +230,8 @@ namespace wfc
 		CUDA_CALL(cudaMalloc((void**)&dev_changed_, sizeof(int)));
 		CUDA_CALL(cudaMalloc((void**)&dev_is_collapsed_, sizeof(int)));
 
-		host_waves_ = new char[wave_shape.size * num_patterns];
-		host_single_wave_ = new char[num_patterns];
+		host_waves_ = new int[wave_shape.size * num_pattern_ints_];
+		host_single_wave_ = new int[num_pattern_ints_];
 		host_changed_ = new int;
 		host_lowest_entropy = new int;
 		host_is_collapsed = new int;
@@ -241,7 +242,7 @@ namespace wfc
 
 		*host_is_collapsed = false;
 
-		std::cout << "Patterns: " << num_patterns << std::endl;
+		std::cout << "Patterns, Int Count: " << num_patterns << ", " << num_pattern_ints_ << std::endl;
 		std::cout << "Overlay Count: " << overlay_count << std::endl;
 		std::cout << "Wave Shape: " << wave_shape.y << " x " << wave_shape.x << std::endl;
 	}
@@ -282,8 +283,13 @@ namespace wfc
 			 */
 			// TODO: Pass in proper converted GPU data
 
+			std::cout << "Before Observe" << std::endl;
+			print_waves();
+			
 			auto t1 = std::chrono::high_resolution_clock::now();
 			observe_wave(*host_lowest_entropy, counts);	// Collapse a wave
+			std::cout << "After Observe" << std::endl;
+			print_waves();
 			auto t2 = std::chrono::high_resolution_clock::now();
 			propagate(dev_overlays, dev_fit_table);			// Propagate through all waves
 			auto t3 = std::chrono::high_resolution_clock::now();
@@ -323,11 +329,13 @@ namespace wfc
 	}
 
 	void GpuModel::get_superposition(const int row, const int col, std::vector<int>& patt_idxs) {
-		const int idx_row_col_patt_base = row * wave_shape.x * num_patterns + col * num_patterns;
+		const int base_idx = row * wave_shape.x * num_pattern_ints_ + col * num_pattern_ints_;
 		// Determines the superposition of patterns at this position.
 		int num_valid_patterns = 0;
 		for (int patt_idx = 0; patt_idx < num_patterns; patt_idx++) {
-			if (host_waves_[patt_idx + idx_row_col_patt_base]) {
+			int pat_int = patt_idx / INT_BITS;
+			int int_idx = patt_idx % INT_BITS;
+			if ((1 << int_idx) & host_waves_[pat_int + base_idx]) {
 				num_valid_patterns += 1;
 				patt_idxs.push_back(patt_idx);
 			}
@@ -344,19 +352,20 @@ namespace wfc
 	}
 
 	void GpuModel::observe_wave(int idx, std::vector<int>& counts) {
-		const int idx_base = idx * num_patterns;
+		const int idx_base = idx * num_pattern_ints_;
 
 		auto t1 = std::chrono::high_resolution_clock::now();
 		CUDA_CALL(cudaMemcpy(host_single_wave_, (dev_waves_ + idx_base), 
-			sizeof(char) * num_patterns, cudaMemcpyDeviceToHost));
+			sizeof(int) * num_pattern_ints_, cudaMemcpyDeviceToHost));
 		auto t2 = std::chrono::high_resolution_clock::now();
 
 		// Determines superposition of states and their total frequency counts.
 		int possible_patterns_sum = 0;
 		for (int i = 0; i < num_patterns; i++) {
-			if (host_single_wave_[i]) {
+			int pat_int = i / INT_BITS;
+			int int_idx = i % INT_BITS;
+			if ((1 << int_idx) & host_single_wave_[pat_int])
 				possible_patterns_sum += counts[i];
-			}
 		}
 
 		int rnd = rand_int(possible_patterns_sum) + 1;
@@ -364,22 +373,25 @@ namespace wfc
 
 		// Randomly selects a state for collapse. Weighted by state frequency count.
 		for (collapsed_index = 0; collapsed_index < num_patterns && rnd>0; collapsed_index++) {
-			if (host_single_wave_[collapsed_index]) {
+			int pat_int = collapsed_index / INT_BITS;
+			int int_idx = collapsed_index % INT_BITS;
+			if ((1 << int_idx) & host_single_wave_[pat_int])
 				rnd -= counts[collapsed_index];
-			}
 		}
 		collapsed_index -= 1;	// Counter-action against additional increment from for-loop
 		assert(collapsed_index >= 0 && collapsed_index < num_patterns);
+		std::cout << "Wave idx, Pattern: " << idx << ", " << collapsed_index << std::endl;
 		auto t3 = std::chrono::high_resolution_clock::now();
 
 		// Update wave in the GPU data
 		//cudaCallCollapseWaveKernel(dev_waves_, idx,collapsed_index, num_patterns);
 		// TODO: evaluate difference between memset and kernel
-		int* wave = dev_waves_ + collapsed_index * num_pattern_ints_;
+		int* wave = dev_waves_ + idx * num_pattern_ints_;
 		int pat_char = collapsed_index / 8;
 		int char_idx = collapsed_index % 8;
-		cudaMemset(wave, 0, sizeof(int) * num_pattern_ints_);
-		cudaMemset(wave + pat_char, 1 << char_idx, 1);
+		std::cout << pat_char << ", " << char_idx << std::endl;
+		CUDA_CALL(cudaMemset(wave, 0, sizeof(int) * num_pattern_ints_));
+		CUDA_CALL(cudaMemset((char*)wave + pat_char, 1 << char_idx, 1));
 		auto t4 = std::chrono::high_resolution_clock::now();
 
 		obs_copy_time += std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
@@ -390,6 +402,8 @@ namespace wfc
 	void GpuModel::propagate(int* overlays, int* fit_table) {
 		// Continue updating waves in GPU as long as there are changes
 		bool changed = true;
+		std::cout << "Propogate Start" << std::endl;
+		print_waves();
 		while (changed) {
 			auto t1 = std::chrono::high_resolution_clock::now();
 			cudaCallUpdateWavesKernel(dev_waves_, fit_table, overlays,
@@ -407,7 +421,9 @@ namespace wfc
 			prop_call_time += std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
 			prop_copy_time += std::chrono::duration_cast<std::chrono::microseconds>(t3 - t2).count();
 
+			print_waves();
 		}
+		std::cout << "Propogation Complete" << std::endl;
 	}
 
 	int* GpuModel::get_device_fit_table(std::vector<std::vector<int>>& fit_table) const {
@@ -465,7 +481,7 @@ namespace wfc
 	void GpuModel::apply_host_waves() const {
 		// Copy GPU waves to CPU
 		CUDA_CALL(cudaMemcpy(host_waves_, dev_waves_,
-			sizeof(char) * wave_shape.size * num_patterns,
+			sizeof(int) * wave_shape.size * num_pattern_ints_,
 			cudaMemcpyDeviceToHost));
 	}
 
@@ -484,15 +500,20 @@ namespace wfc
 		// Get our waves into CPU array first. This transaction is expensive, so
 		// Don't use this in the final version.
 		apply_host_waves();
+		std::cout << "Printing Waves: " << std::endl;
 		for (int r = 0; r < wave_shape.y; r++) {
-			int r_b = r * wave_shape.x * num_patterns;
+			int r_b = r * wave_shape.x * num_pattern_ints_;
 			std::cout << "[ ";
 			for (int c = 0; c < wave_shape.x; c++) {
-				int r_c = r_b + c * num_patterns;
+				int r_c = r_b + c * num_pattern_ints_;
 				std::cout << "< ";
 				for (int p=0; p < num_patterns; p++) {
-					std::cout << (int)host_waves_[r_c + p] << " ";
+					int pat_int = p / INT_BITS;
+					int int_idx = p % INT_BITS;
+					std::cout << (int)(bool)((1 << int_idx) & host_waves_[r_c + pat_int]) << " ";
 				}
+				//for (int i=0; i < num_pattern_ints_; i++)
+				//	std::cout << std::bitset<INT_BITS>(host_waves_[r_c + i]) << " ";
 				std::cout << ">, ";
 			}
 			std::cout << "], " << std::endl;

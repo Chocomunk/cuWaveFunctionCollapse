@@ -1055,7 +1055,7 @@ inline void __getLastCudaError(const char* errorMessage, const char* file, const
 #endif
 
 #ifndef MIN
-#define MIN(a,b) (a > b ? a : b)
+#define MIN(a,b) (a < b ? a : b)
 #endif
 
 // Float To Int conversion
